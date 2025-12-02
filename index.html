@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mini Golf Game - CS559 P3</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            overflow: hidden;
+            background: #1a1a1a;
+        }
+        
+        #group-id {
+            position: absolute;
+            top: 10px;
+            left: 10px;
+            color: white;
+            font-size: 24px;
+            font-weight: bold;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+            background: rgba(0, 0, 0, 0.5);
+            padding: 10px 15px;
+            border-radius: 5px;
+        }
+        
+        #mode-toggle {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            z-index: 100;
+            padding: 10px 20px;
+            font-size: 16px;
+            background: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+        }
+        
+        #mode-toggle:hover {
+            background: #45a049;
+        }
+        
+        #mode-toggle:active {
+            transform: scale(0.95);
+        }
+        
+        #power-meter {
+            position: absolute;
+            bottom: 30px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 300px;
+            height: 20px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid white;
+            border-radius: 10px;
+            display: none;
+            z-index: 100;
+        }
+        
+        #power-meter-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(to right, #00ff00, #ffff00, #ff8800, #ff0000);
+            border-radius: 8px;
+            transition: width 0.1s ease;
+        }
+        
+        canvas {
+            display: block;
+            width: 100vw;
+            height: 100vh;
+        }
+    </style>
+</head>
+<body>
+    <div id="group-id">Group ID: 6767</div>
+    <button id="mode-toggle">Prototype Mode</button>
+    <div id="power-meter">
+        <div id="power-meter-fill"></div>
+    </div>
+    <canvas id="game-canvas"></canvas>
+    
+    <!-- THREE.js from CDN -->
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+    }
+    </script>
+    
+    <!-- Game scripts -->
+    <script type="module" src="js/main.js"></script>
+</body>
+</html>
+
