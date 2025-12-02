@@ -1,0 +1,20 @@
+{
+  "name": "cs559-p3-thing",
+  "version": "1.0.0",
+  "description": "CS559 Project 3 - 3D Graphics with Three.js",
+  "main": "src/main.js",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "keywords": ["cs559", "threejs", "3d", "graphics"],
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "vite": "^5.0.0"
+  },
+  "dependencies": {
+    "three": "^0.159.0"
+  }
+}
