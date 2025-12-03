@@ -1,7 +1,8 @@
 // Mouse/touch input handling for ball aiming and launching
 import * as THREE from 'three';
 import { getBallPosition, getBallMesh, setBallVelocity, getBallVelocity } from './ball.js';
-import { incrementStroke } from './game.js';
+import { incrementStroke, saveBallState } from './game.js';
+import { getSpeedBoostMultiplier, consumeSpeedBoost, isSharpshooterActive, consumeSharpshooter } from './powerup-effects.js';
 
 // These will be set by initControls
 let camera = null;
@@ -163,6 +164,11 @@ function finishAiming() {
     if (!isAiming || !aimStartPosition || !currentMousePosition) return;
     
     const ballPos = getBallPosition();
+    const ballVel = getBallVelocity();
+    
+    // Save ball state before shot (for Mulligan power-up)
+    saveBallState(ballPos, ballVel);
+    
     const ballScreenPos = getScreenPosition(ballPos);
     
     // Calculate pull vector in screen space
@@ -182,19 +188,36 @@ function finishAiming() {
     // Calculate world direction (pull BACK, so ball goes FORWARD in opposite direction)
     const pullBackDirection = calculateWorldDirection(ballScreenPos, currentMousePosition);
     
-    // Apply wobble to direction
-    const wobbleOffset = Math.sin(wobbleTime * WOBBLE_SPEED) * WOBBLE_AMPLITUDE;
-    const finalDirection = new THREE.Vector3(
-        pullBackDirection.x * Math.cos(wobbleOffset) - pullBackDirection.z * Math.sin(wobbleOffset),
-        0,
-        pullBackDirection.x * Math.sin(wobbleOffset) + pullBackDirection.z * Math.cos(wobbleOffset)
-    ).normalize();
+    // Apply wobble to direction (unless Sharpshooter is active)
+    let finalDirection;
+    if (isSharpshooterActive()) {
+        // No wobble - straight shot
+        finalDirection = pullBackDirection.clone();
+        consumeSharpshooter(); // Consume after use
+    } else {
+        // Normal wobble
+        const wobbleOffset = Math.sin(wobbleTime * WOBBLE_SPEED) * WOBBLE_AMPLITUDE;
+        finalDirection = new THREE.Vector3(
+            pullBackDirection.x * Math.cos(wobbleOffset) - pullBackDirection.z * Math.sin(wobbleOffset),
+            0,
+            pullBackDirection.x * Math.sin(wobbleOffset) + pullBackDirection.z * Math.cos(wobbleOffset)
+        ).normalize();
+    }
     
     // Velocity is in the OPPOSITE direction of pull (forward)
     const forwardDirection = finalDirection.clone().multiplyScalar(-1);
     
     // Calculate velocity
-    const velocity = forwardDirection.multiplyScalar(pullDistance * POWER_SCALE);
+    let velocity = forwardDirection.multiplyScalar(pullDistance * POWER_SCALE);
+    
+    // Apply speed boost multiplier if active
+    const speedBoostMultiplier = getSpeedBoostMultiplier();
+    console.log('Launching ball. Speed boost multiplier:', speedBoostMultiplier);
+    if (speedBoostMultiplier > 1.0) {
+        console.log('Applying speed boost! Original velocity:', velocity.length(), 'New velocity:', velocity.length() * speedBoostMultiplier);
+        velocity.multiplyScalar(speedBoostMultiplier);
+        consumeSpeedBoost(); // Consume after use
+    }
     
     // Apply velocity to ball
     setBallVelocity(velocity);
@@ -296,13 +319,22 @@ export function getAimingState() {
     // Calculate base direction (pull back direction)
     const pullBackDirection = calculateWorldDirection(ballScreenPos, currentMousePosition);
     
-    // Apply wobble (only if pulled back enough)
-    const wobbleOffset = Math.sin(wobbleTime * WOBBLE_SPEED) * WOBBLE_AMPLITUDE;
-    const finalPullDirection = new THREE.Vector3(
-        pullBackDirection.x * Math.cos(wobbleOffset) - pullBackDirection.z * Math.sin(wobbleOffset),
-        0,
-        pullBackDirection.x * Math.sin(wobbleOffset) + pullBackDirection.z * Math.cos(wobbleOffset)
-    ).normalize();
+    // Apply wobble (only if pulled back enough and Sharpshooter is not active)
+    let finalPullDirection;
+    let wobbleOffset = 0;
+    if (isSharpshooterActive()) {
+        // No wobble - straight shot
+        finalPullDirection = pullBackDirection.clone();
+        wobbleOffset = 0;
+    } else {
+        // Normal wobble
+        wobbleOffset = Math.sin(wobbleTime * WOBBLE_SPEED) * WOBBLE_AMPLITUDE;
+        finalPullDirection = new THREE.Vector3(
+            pullBackDirection.x * Math.cos(wobbleOffset) - pullBackDirection.z * Math.sin(wobbleOffset),
+            0,
+            pullBackDirection.x * Math.sin(wobbleOffset) + pullBackDirection.z * Math.cos(wobbleOffset)
+        ).normalize();
+    }
     
     // Forward direction (opposite of pull) - this is where the ball will go
     const forwardDirection = finalPullDirection.clone().multiplyScalar(-1);

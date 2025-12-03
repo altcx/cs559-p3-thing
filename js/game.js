@@ -2,6 +2,7 @@
 import * as THREE from 'three';
 import { scene, isFullMode } from './main.js';
 import { getBallPosition, getBallVelocity, resetBall } from './ball.js';
+import { resetCollisions } from './collisions.js';
 
 const BALL_RADIUS = 0.5;
 export const HOLE_RADIUS = 2.0; // Doubled from 1.0 (exported for use in hole-indicator.js)
@@ -21,12 +22,31 @@ let flagMesh = null;
 let chamfer = null;
 let indicatorRing = null; // Color-changing ring around hole
 let strokeCount = 0;
+
+// Clean up old hole meshes before creating new ones
+export function cleanupHole() {
+    if (holeMesh) {
+        scene.remove(holeMesh);
+        holeMesh.geometry?.dispose();
+        holeMesh.material?.dispose();
+        holeMesh = null;
+    }
+    if (chamfer) {
+        scene.remove(chamfer);
+        chamfer.geometry?.dispose();
+        chamfer.material?.dispose();
+        chamfer = null;
+    }
+}
 let par = 3; // Default par for the hole
 let isHoleComplete = false;
 let holeScores = []; // Array of scores for each hole [{hole: 0, strokes: 3, par: 3, relativeScore: 0}, ...]
 let totalScore = 0; // Total score (sum of relative scores - lower is better in golf)
 
 export async function createHole() {
+    // Clean up any existing hole meshes first
+    cleanupHole();
+    
     // Create hole as a deep cylinder going down into the ground
     // Make it deeper and wider to ensure ball can fall in
     // Use BackSide material like inspiration code to avoid collision issues
@@ -41,26 +61,29 @@ export async function createHole() {
     holeMesh.receiveShadow = true;
     scene.add(holeMesh);
     
-    // Create chamfered edge (beveled rim) around the hole
-    // Use a torus positioned at ground level for chamfered effect
-    const chamferRadius = HOLE_RADIUS + 0.3; // Slightly larger than hole for chamfer
-    const chamferTubeRadius = 0.2; // Width of the chamfer
-    const chamferGeometry = new THREE.TorusGeometry(chamferRadius, chamferTubeRadius, 16, 32);
-    const chamferMaterial = isFullMode
-        ? new THREE.MeshBasicMaterial({ color: 0x8B4513 }) // Brown for full mode
-        : new THREE.MeshBasicMaterial({ color: 0xFF6347 }); // Red for prototype
-    
-    chamfer = new THREE.Mesh(chamferGeometry, chamferMaterial);
-    // Position at ground level for chamfered effect
-    chamfer.position.set(HOLE_POSITION.x, 0, HOLE_POSITION.z);
-    chamfer.rotation.x = Math.PI / 2; // Rotate to be horizontal
-    scene.add(chamfer);
+    // Chamfer removed - no longer creating the brown/red torus circle
     
     // Create hole indicator (black circle, color-changing circle with shader, and flag)
     const { createHoleIndicator } = await import('./hole-indicator.js');
     createHoleIndicator(HOLE_POSITION);
     
-    return { holeMesh, chamfer, indicatorRing: null };
+    // Create spotlight on hole (scene is already imported at top of file)
+    // Remove old spotlight if it exists
+    if (window.holeSpotlight) {
+        scene.remove(window.holeSpotlight);
+        if (window.holeSpotlight.target) scene.remove(window.holeSpotlight.target);
+        window.holeSpotlight.dispose();
+    }
+    
+    const spotlight = new THREE.SpotLight(0xffffff, 2.0, 20, Math.PI / 6, 0.5, 2);
+    spotlight.position.set(HOLE_POSITION.x, 10, HOLE_POSITION.z);
+    spotlight.target.position.set(HOLE_POSITION.x, 0, HOLE_POSITION.z);
+    spotlight.castShadow = true;
+    scene.add(spotlight);
+    scene.add(spotlight.target);
+    window.holeSpotlight = spotlight;
+    
+    return { holeMesh, chamfer: null, indicatorRing: null };
 }
 
 export function checkWinCondition() {
@@ -105,6 +128,28 @@ export function checkWinCondition() {
     return false;
 }
 
+let lastBallState = null; // Store ball state before each shot for Mulligan
+
+export function saveBallState(position, velocity) {
+    // Save ball state before a shot (for Mulligan power-up)
+    lastBallState = {
+        position: position.clone(),
+        velocity: velocity.clone()
+    };
+}
+
+export function getLastBallState() {
+    return lastBallState;
+}
+
+export function decrementStroke() {
+    // Decrement stroke count (for Mulligan power-up)
+    if (strokeCount > 0) {
+        strokeCount--;
+    }
+    return strokeCount;
+}
+
 export function incrementStroke() {
     strokeCount++;
     return strokeCount;
@@ -137,6 +182,7 @@ export function resetHole() {
     strokeCount = 0;
     isHoleComplete = false;
     resetBall();
+    resetCollisions();
 }
 
 export function getTotalScore() {

@@ -18,7 +18,7 @@ export const PHYSICS_CONSTANTS = {
 export function updatePhysics(deltaTime) {
     // Update ball physics
     updateBallPhysics(deltaTime);
-    
+
     // Check for wall collisions
     checkWallCollisions();
 }

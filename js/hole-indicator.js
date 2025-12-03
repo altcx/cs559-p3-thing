@@ -2,12 +2,15 @@
 import * as THREE from 'three';
 import { scene } from './main.js';
 import { getHolePosition } from './game.js';
+import { isMagneticPullActive, getMagneticPullEffect } from './powerup-effects.js';
+import { getBallPosition } from './ball.js';
 
 let blackCircle = null;
 let colorChangingCircle = null;
 let flag = null;
 let flagPole = null;
 let poleBall = null; // Golden ball on top of pole
+let magneticFieldIndicators = []; // Array of circles showing magnetic pull range
 
 // Shader for color-changing circle
 const colorChangingShader = {
@@ -23,6 +26,7 @@ const colorChangingShader = {
     `,
     fragmentShader: `
         uniform float time;
+        uniform float opacity;
         varying vec2 vUv;
         
         void main() {
@@ -52,9 +56,9 @@ const colorChangingShader = {
             float pulse = sin(time * 2.0) * 0.1 + 0.9;
             color *= pulse;
             
-            gl_FragColor = vec4(color, 0.7);
+            gl_FragColor = vec4(color, opacity);
         }
-    `
+`
 };
 
 export function createHoleIndicator(holePosition) {
@@ -66,6 +70,7 @@ export function createHoleIndicator(holePosition) {
     if (flag) scene.remove(flag);
     if (flagPole) scene.remove(flagPole);
     if (poleBall) scene.remove(poleBall);
+    cleanupMagneticFieldIndicator(); // Clean up magnetic field indicator
     
     // Create black circle on the ground
     const blackCircleGeometry = new THREE.CircleGeometry(HOLE_RADIUS + 0.2, 32);
@@ -160,8 +165,36 @@ function createFlag(holePosition, poleHeight) {
 export function updateHoleIndicator() {
     // Update shader time for color-changing circle
     if (colorChangingCircle && colorChangingCircle.material.uniforms) {
-        colorChangingCircle.material.uniforms.time.value = Date.now() / 1000;
+        const time = Date.now() / 1000;
+        colorChangingCircle.material.uniforms.time.value = time;
+        
+        // Enhance proximity effect - intensify glow as ball approaches
+        const ballPos = getBallPosition();
+        const holePos = getHolePosition();
+        const distance = Math.sqrt(
+            Math.pow(ballPos.x - holePos.x, 2) +
+            Math.pow(ballPos.z - holePos.z, 2)
+        );
+        
+        // Intensity increases as ball gets closer (max at 5 units away)
+        const maxProximityDistance = 5.0;
+        const proximityFactor = Math.max(0, 1.0 - (distance / maxProximityDistance));
+        
+        // Scale circle size based on proximity (pulse more when close)
+        const baseScale = 1.0;
+        const proximityScale = 1.0 + proximityFactor * 0.3; // Up to 30% larger when close
+        const pulseScale = Math.sin(time * 3.0) * 0.1 + 1.0; // Continuous pulse
+        colorChangingCircle.scale.set(proximityScale * pulseScale, proximityScale * pulseScale, 1.0);
+        
+        // Increase opacity when close
+        if (colorChangingCircle.material.uniforms.opacity === undefined) {
+            colorChangingCircle.material.uniforms.opacity = { value: 0.7 };
+        }
+        colorChangingCircle.material.uniforms.opacity.value = 0.7 + proximityFactor * 0.3; // 0.7 to 1.0
     }
+    
+    // Update magnetic field indicator visibility
+    updateMagneticFieldIndicator();
     
     // Update flag animation (more visible fabric physics)
     if (flag && flag.geometry && flag.userData.originalPositions) {
@@ -206,4 +239,94 @@ export function updateHoleIndicator() {
         positions.needsUpdate = true;
         flag.geometry.computeVertexNormals();
     }
+}
+
+function updateMagneticFieldIndicator() {
+    const isActive = isMagneticPullActive();
+    const magneticEffect = getMagneticPullEffect();
+    
+    if (isActive && magneticEffect) {
+        // Create indicators if they don't exist
+        if (magneticFieldIndicators.length === 0) {
+            console.log('Creating magnetic field indicators with range:', magneticEffect.range);
+            createMagneticFieldIndicators(magneticEffect.range);
+            console.log('Created', magneticFieldIndicators.length, 'magnetic field circles');
+        }
+        
+        // Update all indicators
+        const time = Date.now() / 1000;
+        magneticFieldIndicators.forEach((indicator, index) => {
+            indicator.visible = true;
+            // Animate circle shrinking
+            updateCircleAnimation(indicator, time, index, magneticEffect.range);
+        });
+    } else {
+        // Hide all magnetic field indicators
+        magneticFieldIndicators.forEach(indicator => {
+            indicator.visible = false;
+        });
+    }
+}
+
+function createMagneticFieldIndicators(range) {
+    const holePos = getHolePosition();
+    const NUM_CIRCLES = 5; // Number of animated circles
+    
+    // Create multiple circles that will animate by scaling
+    for (let i = 0; i < NUM_CIRCLES; i++) {
+        // Create a thicker ring geometry - make it more visible
+        const ringThickness = range * 0.2; // 20% of radius thickness (much thicker)
+        const innerRadius = range - ringThickness; // Inner edge
+        const outerRadius = range; // Outer edge matches field range
+        const ringGeometry = new THREE.RingGeometry(innerRadius, outerRadius, 64);
+        
+        // Create a bright purple/magenta material
+        const ringMaterial = new THREE.MeshBasicMaterial({
+            color: 0xFF00FF, // Bright magenta
+            transparent: true,
+            opacity: 1.0, // Fully opaque for visibility
+            side: THREE.DoubleSide
+        });
+        
+        const circle = new THREE.Mesh(ringGeometry, ringMaterial);
+        circle.rotation.x = -Math.PI / 2; // Lay flat on ground
+        circle.position.set(holePos.x, 0.03 + i * 0.001, holePos.z); // Slightly above ground
+        circle.userData.originalRadius = range;
+        circle.userData.circleIndex = i;
+        circle.userData.startTime = Date.now() / 1000 - (i * 0.5); // Stagger start times
+        
+        scene.add(circle);
+        magneticFieldIndicators.push(circle);
+    }
+}
+
+function updateCircleAnimation(circle, time, index, maxRadius) {
+    // Animate circle by scaling it down (shrinking effect)
+    const cycleDuration = 3.0; // 3 seconds per cycle
+    const elapsed = time - circle.userData.startTime;
+    const cycleTime = elapsed % cycleDuration;
+    const progress = cycleTime / cycleDuration; // 0 to 1
+    
+    // Scale from max radius down to center (scale from 1.0 to 0.0)
+    const scale = 1.0 - progress;
+    
+    // Also fade out as it shrinks
+    const fade = scale;
+    
+    // Update scale
+    circle.scale.set(scale, scale, 1.0);
+    
+    // Update opacity
+    if (circle.material) {
+        circle.material.opacity = fade * 0.8;
+    }
+}
+
+export function cleanupMagneticFieldIndicator() {
+    magneticFieldIndicators.forEach(indicator => {
+        scene.remove(indicator);
+        indicator.geometry?.dispose();
+        indicator.material?.dispose();
+    });
+    magneticFieldIndicators = [];
 }

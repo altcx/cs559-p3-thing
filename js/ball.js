@@ -3,11 +3,37 @@ import * as THREE from 'three';
 import { scene, isFullMode } from './main.js';
 import { PHYSICS_CONSTANTS } from './physics.js';
 import { getHolePosition } from './game.js';
-import { getTerrainHeight } from './course.js';
+import { getTerrainHeight, getRectangularHoles } from './course.js';
+import { isMagneticPullActive, getMagneticPullEffect } from './powerup-effects.js';
+import { handleRectangularHoleOutOfBounds } from './collisions.js';
+
+// Calculate terrain slope gradient for realistic ball rolling
+function calculateSlopeGradient(x, z, direction) {
+    const sampleDistance = 0.5; // Distance to sample terrain height
+    const currentHeight = getTerrainHeight(x, z);
+
+    let adjacentHeight;
+    if (direction === 'x') {
+        // Calculate gradient in X direction
+        adjacentHeight = getTerrainHeight(x + sampleDistance, z);
+    } else if (direction === 'z') {
+        // Calculate gradient in Z direction
+        adjacentHeight = getTerrainHeight(x, z + sampleDistance);
+    } else {
+        return 0;
+    }
+
+    // Return the slope (rise over run)
+    return (adjacentHeight - currentHeight) / sampleDistance;
+}
 
 const BALL_RADIUS = 0.5;
 const COURSE_HEIGHT = 50; // Will match course.js (updated to square)
 let BALL_START_POSITION = new THREE.Vector3(0, BALL_RADIUS, -COURSE_HEIGHT / 2 + 5); // Near top of course
+
+// Track if ball has already triggered rectangular hole out of bounds
+let hasTriggeredRectangularHoleOOB = false;
+let rectangularHoleOOBTimer = 0; // Keep for now in case needed later
 
 export function setBallStartPosition(position) {
     BALL_START_POSITION.copy(position);
@@ -51,27 +77,60 @@ export function updateBallPhysics(deltaTime) {
     const MAX_PULL_DISTANCE = 1.67;
     const POWER_SCALE = 80;
     const MAX_SPEED = MAX_PULL_DISTANCE * POWER_SCALE; // ~133.6 units/sec
-    const SPEED_THRESHOLD = MAX_SPEED * 0.75; // 75% of max speed (~100 units/sec)
     
     // Get current horizontal speed
     let horizontalVel = new THREE.Vector3(ballVelocity.x, 0, ballVelocity.z);
     let currentSpeed = horizontalVel.length();
     
+    // Check if ball is over any rectangular hole (hazard)
+    const rectangularHoles = getRectangularHoles();
+    let isOverRectangularHole = false;
+    for (const rectHole of rectangularHoles) {
+        const halfWidth = rectHole.width / 2;
+        const halfLength = rectHole.length / 2;
+        const distX = Math.abs(ballPosition.x - rectHole.x);
+        const distZ = Math.abs(ballPosition.z - rectHole.z);
+        if (distX < halfWidth && distZ < halfLength) {
+            isOverRectangularHole = true;
+            break;
+        }
+    }
+    
     // Check if ball is deep in hole (below ground)
     const isDeepInHole = ballPosition.y < -0.5 && isOverHole;
     
-    // Apply strong downward force when over hole and going slow enough
-    if (isOverHole && currentSpeed < SPEED_THRESHOLD) {
-        // Very strong downward force to guarantee falling in (doubled from -50.0)
-        const DOWNWARD_FORCE = -100.0; // Doubled downward acceleration
+    // Apply EXTREMELY strong downward force when over hole - MUCH easier to fall in
+    if (isOverHole) {
+        // Always apply very strong downward force regardless of speed
+        const BASE_DOWNWARD_FORCE = -200.0; // Much stronger force (doubled from -100.0)
+        
+        // Even stronger force when going slower, but still strong when fast
+        const speedFactor = Math.min(currentSpeed / MAX_SPEED, 1.0); // 0 to 1
+        const DOWNWARD_FORCE = BASE_DOWNWARD_FORCE * (1.0 - speedFactor * 0.3); // At max speed, still 70% of force
+        
         ballVelocity.y += DOWNWARD_FORCE * deltaTime;
         
-        // Also reduce horizontal velocity to help pull ball into hole
-        ballVelocity.x *= 0.9;
-        ballVelocity.z *= 0.9;
-    } else if (isOverHole && currentSpeed >= SPEED_THRESHOLD) {
-        // Still apply some gravity even when going fast, but less
-        ballVelocity.y += -9.8 * deltaTime;
+        // Aggressively reduce horizontal velocity to pull ball into hole
+        const reductionFactor = 0.85 - (speedFactor * 0.1); // 0.85 to 0.75 (more aggressive)
+        ballVelocity.x *= reductionFactor;
+        ballVelocity.z *= reductionFactor;
+    }
+    
+    // Apply gravity when over rectangular holes (hazards)
+    if (isOverRectangularHole) {
+        // Apply strong downward force to make ball fall into rectangular holes
+        const DOWNWARD_FORCE = -150.0; // Strong gravity for hazards
+        ballVelocity.y += DOWNWARD_FORCE * deltaTime;
+        
+        // Check if ball has fallen deep into rectangular hole (out of bounds)
+        if (ballPosition.y < -3.0 && !hasTriggeredRectangularHoleOOB) {
+            // Ball has fallen deep into hazard - trigger out of bounds immediately (no pause)
+            hasTriggeredRectangularHoleOOB = true;
+            handleRectangularHoleOutOfBounds();
+        }
+    } else {
+        // Reset flag when ball is no longer over rectangular hole
+        hasTriggeredRectangularHoleOOB = false;
     }
     
     // Add damping when deep in hole to slow down for win condition
@@ -80,6 +139,34 @@ export function updateBallPhysics(deltaTime) {
         ballVelocity.multiplyScalar(0.95); // Reduce velocity by 5% per frame
     }
     
+    // Apply magnetic pull force if active
+    if (isMagneticPullActive()) {
+        const magneticEffect = getMagneticPullEffect();
+        if (magneticEffect) {
+            const holePos = getHolePosition();
+            const directionToHole = new THREE.Vector3(
+                holePos.x - ballPosition.x,
+                0, // Only horizontal pull
+                holePos.z - ballPosition.z
+            );
+            const distanceToHole = directionToHole.length();
+            
+            // Apply pull if within range
+            if (distanceToHole > 0 && distanceToHole < magneticEffect.range) {
+                // Normalize direction
+                directionToHole.normalize();
+                
+                // Calculate pull strength (stronger when closer, inverse square law)
+                const normalizedDistance = distanceToHole / magneticEffect.range; // 0 to 1
+                const pullStrength = magneticEffect.strength * (1.0 - normalizedDistance * 0.5); // Stronger when closer
+                
+                // Apply pull force to velocity
+                const pullForce = directionToHole.multiplyScalar(pullStrength * deltaTime * 60); // Scale by deltaTime and 60 for consistent force
+                ballVelocity.add(pullForce);
+            }
+        }
+    }
+
     // Apply velocity to position
     const movement = ballVelocity.clone().multiplyScalar(deltaTime);
     ballPosition.add(movement);
@@ -115,25 +202,39 @@ export function updateBallPhysics(deltaTime) {
         ballVelocity.z = 0;
     }
     
-    // Handle terrain collision (ground and hump)
-    if (!isOverHole) {
+    // Handle terrain collision (ground, slopes, and humps)
+    // Skip terrain collision if over the main hole OR over a rectangular hole
+    if (!isOverHole && !isOverRectangularHole) {
         // Get terrain height at current position
         const terrainY = getTerrainHeight(ballPosition.x, ballPosition.z);
         const targetY = terrainY + BALL_RADIUS;
-        
-        // If ball is below terrain, push it up
+
+        // Calculate slope gradient for realistic rolling physics
+        const slopeGradientX = calculateSlopeGradient(ballPosition.x, ballPosition.z, 'x');
+        const slopeGradientZ = calculateSlopeGradient(ballPosition.x, ballPosition.z, 'z');
+
+        // Apply slope-based gravity (ball rolls downhill)
+        const slopeGravityStrength = 15.0; // How strongly the ball is pulled by slopes
+        ballVelocity.x += slopeGradientX * slopeGravityStrength * deltaTime;
+        ballVelocity.z += slopeGradientZ * slopeGravityStrength * deltaTime;
+
+        // Handle vertical collision with terrain
         if (ballPosition.y < targetY) {
             ballPosition.y = targetY;
             // Stop falling if hitting terrain
             if (ballVelocity.y < 0) {
                 ballVelocity.y = 0;
             }
+            // Add some friction when rolling on slopes
+            const friction = 0.95;
+            ballVelocity.x *= friction;
+            ballVelocity.z *= friction;
         } else if (ballPosition.y > targetY + 0.1) {
             // If ball is significantly above terrain, apply gravity
             ballVelocity.y += PHYSICS_CONSTANTS.GRAVITY * deltaTime;
         }
     }
-    // If over hole, allow ball to fall freely (no terrain collision)
+    // If over hole or rectangular hole, allow ball to fall freely (no terrain collision)
     
     // Update mesh position
     if (ballMesh) {
@@ -199,6 +300,8 @@ export function showBall() {
 export function resetBall() {
     ballPosition.copy(BALL_START_POSITION);
     ballVelocity.set(0, 0, 0);
+    // Reset rectangular hole OOB tracking
+    hasTriggeredRectangularHoleOOB = false;
     if (ballMesh) {
         ballMesh.position.copy(ballPosition);
         ballMesh.rotation.set(0, 0, 0);

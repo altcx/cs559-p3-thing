@@ -1,8 +1,21 @@
 // Course management and multiple courses
 import * as THREE from 'three';
 import { scene } from './main.js';
-import { createCourse as createCourseGeometry, getCourseBounds } from './course.js';
+import { createCourse as createCourseGeometry, getCourseBounds, getRectangularHoleWalls, getRectangularHoleEdgeWalls, removeAllRectangularHoleWalls, removeAllCustomWalls } from './course.js';
 import { createHole, setHolePosition } from './game.js';
+import { createPowerUp, removeAllPowerUps, POWERUP_TYPES } from './powerups.js';
+import { removeAllBumpers } from './bumpers.js';
+
+// Import all level definitions
+import { level1 } from './levels/level1.js';
+import { level2 } from './levels/level2.js';
+import { level3 } from './levels/level3.js';
+import { level4 } from './levels/level4.js';
+import { level5 } from './levels/level5.js';
+import { level6 } from './levels/level6.js';
+import { level7 } from './levels/level7.js';
+import { level8 } from './levels/level8.js';
+import { level9 } from './levels/level9.js';
 
 let gameMode = 'single'; // 'single' or '9holes'
 let currentHoleIn9HoleGame = 0;
@@ -11,80 +24,17 @@ let currentCourseIndex = 0;
 let courses = [];
 
 // Course definitions - 9 holes total
+// Each level is now defined in its own file in the levels/ directory
 const COURSE_DEFINITIONS = [
-    // Hole 1: Long rectangle (straight)
-    {
-        width: 15,  // Narrow width (left-right)
-        height: 60, // Long length (front-back)
-        holePosition: new THREE.Vector3(0, 0, 25),
-        ballStartPosition: new THREE.Vector3(0, 0.5, -25),
-        hasHump: false,
-        wallHeight: 1.0 // Shorter walls for hole 1
-    },
-    // Hole 2: Placeholder
-    {
-        width: 50,
-        height: 50,
-        holePosition: new THREE.Vector3(0, 0, 20),
-        ballStartPosition: new THREE.Vector3(0, 0.5, -20),
-        hasHump: false
-    },
-    // Hole 3: Placeholder
-    {
-        width: 50,
-        height: 50,
-        holePosition: new THREE.Vector3(0, 0, 20),
-        ballStartPosition: new THREE.Vector3(0, 0.5, -20),
-        hasHump: false
-    },
-    // Hole 4: Placeholder
-    {
-        width: 50,
-        height: 50,
-        holePosition: new THREE.Vector3(0, 0, 20),
-        ballStartPosition: new THREE.Vector3(0, 0.5, -20),
-        hasHump: false
-    },
-    // Hole 5: Placeholder
-    {
-        width: 50,
-        height: 50,
-        holePosition: new THREE.Vector3(0, 0, 20),
-        ballStartPosition: new THREE.Vector3(0, 0.5, -20),
-        hasHump: false
-    },
-    // Hole 6: Placeholder
-    {
-        width: 50,
-        height: 50,
-        holePosition: new THREE.Vector3(0, 0, 20),
-        ballStartPosition: new THREE.Vector3(0, 0.5, -20),
-        hasHump: false
-    },
-    // Hole 7: Placeholder
-    {
-        width: 50,
-        height: 50,
-        holePosition: new THREE.Vector3(0, 0, 20),
-        ballStartPosition: new THREE.Vector3(0, 0.5, -20),
-        hasHump: false
-    },
-    // Hole 8: Placeholder
-    {
-        width: 50,
-        height: 50,
-        holePosition: new THREE.Vector3(0, 0, 20),
-        ballStartPosition: new THREE.Vector3(0, 0.5, -20),
-        hasHump: false
-    },
-    // Hole 9: Placeholder
-    {
-        width: 50,
-        height: 50,
-        holePosition: new THREE.Vector3(0, 0, 20),
-        ballStartPosition: new THREE.Vector3(0, 0.5, -20),
-        hasHump: false
-    }
+    level1,
+    level2,
+    level3,
+    level4,
+    level5,
+    level6,
+    level7,
+    level8,
+    level9
 ];
 
 export function getCurrentCourseIndex() {
@@ -104,25 +54,66 @@ export function getCurrentCourseDefinition() {
 }
 
 export async function loadCourse(courseIndex) {
+    // Remove all power-ups from previous course
+    removeAllPowerUps();
+    
     // Remove previous course and any start markers
     if (courses.length > 0) {
         courses.forEach(course => {
-            if (course.plane) scene.remove(course.plane);
-            if (course.hump) scene.remove(course.hump);
-            if (course.holeMesh) scene.remove(course.holeMesh);
-            if (course.chamfer) scene.remove(course.chamfer);
-            if (course.walls) {
-                course.walls.forEach(wall => scene.remove(wall));
+            if (course.plane) {
+                scene.remove(course.plane);
+                course.plane.geometry?.dispose();
+                course.plane.material?.dispose();
             }
-            if (course.startMarker) scene.remove(course.startMarker);
+            if (course.hump) {
+                scene.remove(course.hump);
+                course.hump.geometry?.dispose();
+                course.hump.material?.dispose();
+            }
+            if (course.holeMesh) {
+                scene.remove(course.holeMesh);
+                course.holeMesh.geometry?.dispose();
+                course.holeMesh.material?.dispose();
+            }
+            if (course.chamfer) {
+                scene.remove(course.chamfer);
+                course.chamfer.geometry?.dispose();
+                course.chamfer.material?.dispose();
+            }
+            if (course.walls) {
+                course.walls.forEach(wall => {
+                    scene.remove(wall);
+                    wall.geometry?.dispose();
+                    wall.material?.dispose();
+                });
+            }
+            if (course.startMarker) {
+                scene.remove(course.startMarker);
+                course.startMarker.geometry?.dispose();
+                course.startMarker.material?.dispose();
+            }
         });
         courses = [];
     }
     
-    // Remove any orphaned start markers from scene
+    // Remove all bumpers from previous course
+    removeAllBumpers();
+
+    // Remove rectangular hole walls (both edge and interior)
+    removeAllRectangularHoleWalls();
+
+    // Remove all custom walls from previous course
+    removeAllCustomWalls();
+    
+    // Also remove any orphaned hole indicators and chamfers
     const objectsToRemove = [];
     scene.traverse((child) => {
         if (child.userData && child.userData.isStartMarker) {
+            objectsToRemove.push(child);
+        }
+        // Remove any orphaned chamfers (torus geometries at y=0)
+        // Note: We've already cleared courses, so we can safely remove all torus geometries
+        if (child.geometry && child.geometry.type === 'TorusGeometry' && child.position.y === 0) {
             objectsToRemove.push(child);
         }
     });
@@ -131,6 +122,7 @@ export async function loadCourse(courseIndex) {
         if (obj.geometry) obj.geometry.dispose();
         if (obj.material) obj.material.dispose();
     });
+    
     
     currentCourseIndex = courseIndex;
     
@@ -150,6 +142,28 @@ export async function loadCourse(courseIndex) {
     // Create hole at the correct position
     const holeData = await createHole();
     
+    // Create power-ups for this course
+    const powerUps = [];
+    if (courseDef.powerUpPositions && courseDef.powerUpPositions.length > 0) {
+        console.log('Creating', courseDef.powerUpPositions.length, 'power-ups for course', courseIndex);
+        courseDef.powerUpPositions.forEach((pos, index) => {
+            // Randomly select from all available power-ups with equal probability
+            const availablePowerUps = [
+                POWERUP_TYPES.SPEED_BOOST,
+                POWERUP_TYPES.SHARPSHOOTER,
+                POWERUP_TYPES.MAGNETIC_PULL,
+                POWERUP_TYPES.REWIND
+            ];
+            const powerUpType = availablePowerUps[Math.floor(Math.random() * availablePowerUps.length)];
+            
+            console.log(`Creating power-up ${index} at position:`, pos, 'type:', powerUpType);
+            const powerUp = createPowerUp(pos, powerUpType);
+            powerUps.push(powerUp);
+        });
+    } else {
+        console.log('No power-up positions defined for course', courseIndex);
+    }
+    
     const course = {
         index: courseIndex,
         definition: courseDef,
@@ -157,7 +171,8 @@ export async function loadCourse(courseIndex) {
         hump: courseData.hump,
         walls: courseData.walls,
         holeMesh: holeData.holeMesh,
-        chamfer: holeData.chamfer
+        chamfer: holeData.chamfer,
+        powerUps: powerUps
     };
     
     courses.push(course);

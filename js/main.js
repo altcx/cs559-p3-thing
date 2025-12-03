@@ -3,16 +3,20 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { initPhysics, updatePhysics } from './physics.js';
 import { createCourse } from './course.js';
-import { createBall, getBallPosition, resetBall, setBallPosition, setBallStartPosition, hideBall, showBall, getBallMesh } from './ball.js';
+import { createBall, getBallPosition, getBallVelocity, resetBall, setBallPosition, setBallVelocity, setBallStartPosition, hideBall, showBall, getBallMesh } from './ball.js';
+import { resetCollisions } from './collisions.js';
 import { initControls, updateWobbleTime } from './controls.js';
 import { initUI, updateUI } from './ui.js';
-import { createHole, checkWinCondition, incrementStroke, getStrokeCount, getPar, calculateRating, resetHole, getTotalScore, addHoleScore, getHoleScores, getHolePosition, setHolePosition, resetTotalScore } from './game.js';
+import { createHole, checkWinCondition, incrementStroke, getStrokeCount, getPar, calculateRating, resetHole, getTotalScore, addHoleScore, getHoleScores, getHolePosition, setHolePosition, resetTotalScore, getLastBallState, decrementStroke } from './game.js';
 import { initHUD, updateHUD, showRating, showHoleCompleteScreen, hideHoleCompleteScreen, triggerRatingEffects, showRatingText, hideRatingText } from './hud.js';
 import { loadCourse, nextCourse, getCurrentCourseIndex, getTotalCourses } from './courses.js';
 import { updateHoleIndicator } from './hole-indicator.js';
 import { updateAnimations, updateScreenShake } from './animations.js';
-import { updateParticles } from './particles.js';
+import { updateParticles, updateBallTrail, createBallTrail, createEnvironmentalParticles, updateEnvironmentalParticles } from './particles.js';
 import { initMenu, hideMenu, showMenu } from './menu.js';
+import { createPowerUp, updatePowerUps, checkPowerUpCollection, removeAllPowerUps } from './powerups.js';
+import { initInventory, addToInventory, clearInventory } from './inventory.js';
+import { activateSpeedBoost, activateSharpshooter, activateMagneticPull, activateRewind, clearAllPowerUps as clearAllPowerUpEffects, clearMagneticPull, getSpeedBoostMultiplier, consumeSpeedBoost } from './powerup-effects.js';
 
 // Get canvas element
 const canvas = document.getElementById('game-canvas');
@@ -166,6 +170,15 @@ try {
     console.error('Error initializing menu:', error);
 }
 
+// Initialize Inventory
+try {
+    initInventory();
+    console.log('Inventory initialized');
+} catch (error) {
+    console.error('Error initializing inventory:', error);
+}
+
+
 // Delta time tracking for smooth animations
 let lastTime = 0;
 const targetFPS = 60;
@@ -174,6 +187,7 @@ const frameTime = 1000 / targetFPS;
 // Render loop
 function animate(currentTime) {
     requestAnimationFrame(animate);
+    
     
     // Calculate delta time in seconds
     const deltaTime = Math.min((currentTime - lastTime) / 1000, 0.1); // Cap at 0.1s to prevent large jumps
@@ -200,6 +214,23 @@ function animate(currentTime) {
     // Update particles
     updateParticles();
     
+    // Update ball trail
+    const ballPos = getBallPosition();
+    const ballVel = getBallVelocity();
+    updateBallTrail(ballPos, ballVel);
+    
+    // Update environmental particles
+    updateEnvironmentalParticles();
+    
+    // Update power-ups (bob animation, rotation, shader)
+    updatePowerUps(camera);
+    
+    // Check power-up collection
+    const collectedPowerUp = checkPowerUpCollection(ballPos);
+    if (collectedPowerUp) {
+        addToInventory(collectedPowerUp);
+    }
+    
     // Check win condition
     const winResult = checkWinCondition();
     if (winResult) {
@@ -210,6 +241,9 @@ function animate(currentTime) {
             
             // Despawn ball when it goes through the hole
             hideBall();
+            
+            // Clear Magnetic Pull power-up (it lasts until hole completion)
+            clearMagneticPull();
             
             // Add hole score (golf scoring - relative to par)
             const currentStrokes = getStrokeCount();
@@ -310,8 +344,43 @@ window.addEventListener('startGame', (event) => {
         currentHoleIn9HoleGame = 0;
     }
     
+    // Clear inventory and power-ups when starting a new game
+    clearInventory();
+    clearAllPowerUpEffects();
+    
     // Load the starting hole
     loadAndStartHole(startHole, mode);
+});
+
+// Listen for power-up activation events
+window.addEventListener('powerUpActivated', (event) => {
+    const powerUp = event.detail;
+    console.log('Power-up activated event received:', powerUp);
+    if (powerUp.type === 'SPEED_BOOST') {
+        activateSpeedBoost();
+        console.log('Speed Boost activated! Multiplier:', getSpeedBoostMultiplier());
+    } else if (powerUp.type === 'SHARPSHOOTER') {
+        activateSharpshooter();
+        console.log('Sharpshooter activated! Arrow wobble disabled.');
+    } else if (powerUp.type === 'MAGNETIC_PULL') {
+        activateMagneticPull();
+        console.log('Magnetic Pull activated! Ball will be attracted to hole.');
+    } else if (powerUp.type === 'REWIND') {
+        activateRewind();
+        console.log('Rewind activated! Undoing last shot.');
+        
+        const lastState = getLastBallState();
+        if (lastState) {
+            // Restore ball position and velocity
+            setBallPosition(lastState.position);
+            setBallVelocity(lastState.velocity);
+            // Decrement stroke count
+            decrementStroke();
+            console.log('Ball reset to previous position, stroke count decremented');
+        } else {
+            console.log('No previous shot to undo');
+        }
+    }
 });
 
 async function loadAndStartHole(holeIndex, mode) {
@@ -321,18 +390,32 @@ async function loadAndStartHole(holeIndex, mode) {
             setHolePosition(courseDef.definition.holePosition);
             setBallStartPosition(courseDef.definition.ballStartPosition);
             
+            // Don't clear inventory - power-ups persist across holes
+            // Only clear active effects (consumed power-ups)
+            clearAllPowerUpEffects();
+            
             // Create ball if it doesn't exist
             if (!getBallMesh()) {
                 createBall();
+                createBallTrail(); // Initialize ball trail
             }
             
             // Reset ball to start position
             resetBall();
+            resetCollisions();
             showBall();
             
             // Reset camera following
             cameraFollowingBall = true;
             controls.enabled = true;
+            
+            // Rotate camera 180 degrees so it faces forward (towards hole)
+            const ballPos = getBallPosition();
+            controls.target.set(ballPos.x, ballPos.y, ballPos.z);
+            // Position camera behind ball (180 degrees rotated)
+            camera.position.set(ballPos.x, ballPos.y + CAMERA_HEIGHT, ballPos.z - CAMERA_DISTANCE);
+            camera.lookAt(ballPos);
+            controls.update();
             
             // Reset hole completion state
             resetHole();
@@ -349,6 +432,7 @@ async function loadAndStartHole(holeIndex, mode) {
         console.error('Error loading course:', error);
     }
 }
+
 
 // Listen for next course event
 window.addEventListener('nextCourse', () => {
