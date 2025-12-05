@@ -1,6 +1,6 @@
 // Bumper obstacle system
 import * as THREE from 'three';
-import { scene } from './main.js';
+import { scene, isFullMode } from './main.js';
 
 let bumpers = [];
 
@@ -10,13 +10,17 @@ export function createBumper(position, radius = 1.0, tubeRadius = 0.3) {
     
     // Create donut-shaped bumper using TorusGeometry
     const bumperGeometry = new THREE.TorusGeometry(radius, tubeRadius, 16, 32);
-    const bumperMaterial = new THREE.MeshStandardMaterial({ 
-        color: 0xFFD700, // Gold color
-        metalness: 0.5,
-        roughness: 0.3,
-        emissive: 0xFFD700,
-        emissiveIntensity: 0.2
-    });
+    const bumperMaterial = isFullMode
+        ? new THREE.MeshStandardMaterial({ 
+            color: 0xFFD700, // Gold color
+            metalness: 0.5,
+            roughness: 0.3,
+            emissive: 0xFFD700,
+            emissiveIntensity: 0.2
+        })
+        : new THREE.MeshBasicMaterial({
+            color: 0xFFD700 // Gold color
+        });
     const bumper = new THREE.Mesh(bumperGeometry, bumperMaterial);
     bumper.rotation.x = Math.PI / 2; // Rotate to be horizontal (parallel to ground)
     bumper.castShadow = true;

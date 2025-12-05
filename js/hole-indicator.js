@@ -1,6 +1,6 @@
 // Hole indicator with shader-based color-changing circle
 import * as THREE from 'three';
-import { scene } from './main.js';
+import { scene, isFullMode } from './main.js';
 import { getHolePosition } from './game.js';
 import { isMagneticPullActive, getMagneticPullEffect } from './powerup-effects.js';
 import { getBallPosition } from './ball.js';
@@ -83,38 +83,48 @@ export function createHoleIndicator(holePosition) {
     blackCircle.position.set(holePosition.x, 0.01, holePosition.z); // Slightly above ground
     scene.add(blackCircle);
     
-    // Create color-changing circle with shader
+    // Create color-changing circle with shader (or basic material in prototype mode)
     const colorCircleGeometry = new THREE.CircleGeometry(HOLE_RADIUS + 0.5, 32);
-    const colorCircleMaterial = new THREE.ShaderMaterial({
-        uniforms: colorChangingShader.uniforms,
-        vertexShader: colorChangingShader.vertexShader,
-        fragmentShader: colorChangingShader.fragmentShader,
-        transparent: true,
-        side: THREE.DoubleSide
-    });
+    const colorCircleMaterial = isFullMode
+        ? new THREE.ShaderMaterial({
+            uniforms: colorChangingShader.uniforms,
+            vertexShader: colorChangingShader.vertexShader,
+            fragmentShader: colorChangingShader.fragmentShader,
+            transparent: true,
+            side: THREE.DoubleSide
+        })
+        : new THREE.MeshBasicMaterial({
+            color: 0x00ff00, // Green in prototype mode
+            transparent: true,
+            opacity: 0.8,
+            side: THREE.DoubleSide
+        });
     colorChangingCircle = new THREE.Mesh(colorCircleGeometry, colorCircleMaterial);
     colorChangingCircle.rotation.x = -Math.PI / 2;
     colorChangingCircle.position.set(holePosition.x, 0.02, holePosition.z); // Above black circle
     scene.add(colorChangingCircle);
     
-    // Create flag pole (taller)
-    const poleHeight = 7.0; // Increased from 6.0
-    const poleGeometry = new THREE.CylinderGeometry(0.05, 0.05, poleHeight, 8);
-    const poleMaterial = new THREE.MeshBasicMaterial({ color: 0x8B4513 }); // Brown
-    flagPole = new THREE.Mesh(poleGeometry, poleMaterial);
-    flagPole.position.set(holePosition.x, poleHeight / 2, holePosition.z);
-    scene.add(flagPole);
-    
-    // Create golden ball on top of pole
-    const ballRadius = 0.15;
-    const ballGeometry = new THREE.SphereGeometry(ballRadius, 16, 16);
-    const ballMaterial = new THREE.MeshBasicMaterial({ color: 0xFFD700 }); // Gold
-    poleBall = new THREE.Mesh(ballGeometry, ballMaterial);
-    poleBall.position.set(holePosition.x, poleHeight, holePosition.z);
-    scene.add(poleBall);
-    
-    // Create flag with simple fabric physics
-    createFlag(holePosition, poleHeight);
+    // Only create flag and pole in full mode
+    if (isFullMode) {
+        // Create flag pole (taller)
+        const poleHeight = 7.0; // Increased from 6.0
+        const poleGeometry = new THREE.CylinderGeometry(0.05, 0.05, poleHeight, 8);
+        const poleMaterial = new THREE.MeshBasicMaterial({ color: 0x8B4513 }); // Brown
+        flagPole = new THREE.Mesh(poleGeometry, poleMaterial);
+        flagPole.position.set(holePosition.x, poleHeight / 2, holePosition.z);
+        scene.add(flagPole);
+        
+        // Create golden ball on top of pole
+        const ballRadius = 0.15;
+        const ballGeometry = new THREE.SphereGeometry(ballRadius, 16, 16);
+        const ballMaterial = new THREE.MeshBasicMaterial({ color: 0xFFD700 }); // Gold
+        poleBall = new THREE.Mesh(ballGeometry, ballMaterial);
+        poleBall.position.set(holePosition.x, poleHeight, holePosition.z);
+        scene.add(poleBall);
+        
+        // Create flag with simple fabric physics
+        createFlag(holePosition, poleHeight);
+    }
 }
 
 function createFlag(holePosition, poleHeight) {
@@ -257,8 +267,18 @@ function updateMagneticFieldIndicator() {
         const time = Date.now() / 1000;
         magneticFieldIndicators.forEach((indicator, index) => {
             indicator.visible = true;
-            // Animate circle shrinking
-            updateCircleAnimation(indicator, time, index, magneticEffect.range);
+            
+            // Handle arrows separately
+            if (indicator.userData.isArrow) {
+                // Pulse arrows
+                const pulse = Math.sin(time * 2.0 + indicator.userData.angle) * 0.3 + 0.7;
+                if (indicator.material) {
+                    indicator.material.opacity = pulse * 0.9;
+                }
+            } else {
+                // Animate circle shrinking
+                updateCircleAnimation(indicator, time, index, magneticEffect.range);
+            }
         });
     } else {
         // Hide all magnetic field indicators
@@ -270,39 +290,129 @@ function updateMagneticFieldIndicator() {
 
 function createMagneticFieldIndicators(range) {
     const holePos = getHolePosition();
-    const NUM_CIRCLES = 5; // Number of animated circles
+    const NUM_CIRCLES = 8; // Increased from 5 to 8 for more visibility
     
-    // Create multiple circles that will animate by scaling
+    // Create a large base circle showing the full range
+    const baseRingThickness = range * 0.15; // Thick base ring
+    const baseRingGeometry = new THREE.RingGeometry(range - baseRingThickness, range, 128);
+    const baseRingMaterial = new THREE.MeshBasicMaterial({
+        color: 0xADD8E6, // Pastel blue
+        transparent: true,
+        opacity: 0.9, // Very visible
+        side: THREE.DoubleSide
+    });
+    const baseCircle = new THREE.Mesh(baseRingGeometry, baseRingMaterial);
+    baseCircle.rotation.x = -Math.PI / 2;
+    baseCircle.position.set(holePos.x, 0.1, holePos.z); // Higher above ground
+    baseCircle.userData.isBaseRing = true;
+    scene.add(baseCircle);
+    magneticFieldIndicators.push(baseCircle);
+    
+    // Create multiple animated circles that will shrink inward
     for (let i = 0; i < NUM_CIRCLES; i++) {
-        // Create a thicker ring geometry - make it more visible
-        const ringThickness = range * 0.2; // 20% of radius thickness (much thicker)
-        const innerRadius = range - ringThickness; // Inner edge
-        const outerRadius = range; // Outer edge matches field range
-        const ringGeometry = new THREE.RingGeometry(innerRadius, outerRadius, 64);
+        // Create much thicker rings for better visibility
+        const ringThickness = range * 0.4; // 40% of radius thickness (much thicker!)
+        const innerRadius = range - ringThickness;
+        const outerRadius = range;
+        const ringGeometry = new THREE.RingGeometry(innerRadius, outerRadius, 128);
         
-        // Create a bright purple/magenta material
+        // Create a bright, glowing pastel blue material
         const ringMaterial = new THREE.MeshBasicMaterial({
-            color: 0xFF00FF, // Bright magenta
+            color: 0xADD8E6, // Pastel blue
             transparent: true,
-            opacity: 1.0, // Fully opaque for visibility
+            opacity: 1.0, // Fully opaque
             side: THREE.DoubleSide
         });
         
         const circle = new THREE.Mesh(ringGeometry, ringMaterial);
         circle.rotation.x = -Math.PI / 2; // Lay flat on ground
-        circle.position.set(holePos.x, 0.03 + i * 0.001, holePos.z); // Slightly above ground
+        circle.position.set(holePos.x, 0.1 + i * 0.01, holePos.z); // Higher above ground, stacked
         circle.userData.originalRadius = range;
         circle.userData.circleIndex = i;
-        circle.userData.startTime = Date.now() / 1000 - (i * 0.5); // Stagger start times
+        circle.userData.startTime = Date.now() / 1000 - (i * 0.4); // Stagger start times
         
         scene.add(circle);
         magneticFieldIndicators.push(circle);
     }
+    
+    // Create inner glow circle for extra visibility
+    const innerGlowGeometry = new THREE.CircleGeometry(range * 0.3, 64);
+    const innerGlowMaterial = new THREE.MeshBasicMaterial({
+        color: 0xADD8E6, // Pastel blue
+        transparent: true,
+        opacity: 0.6,
+        side: THREE.DoubleSide
+    });
+    const innerGlow = new THREE.Mesh(innerGlowGeometry, innerGlowMaterial);
+    innerGlow.rotation.x = -Math.PI / 2;
+    innerGlow.position.set(holePos.x, 0.12, holePos.z);
+    innerGlow.userData.isInnerGlow = true;
+    scene.add(innerGlow);
+    magneticFieldIndicators.push(innerGlow);
+    
+    // Create directional arrows/lines pointing toward the hole for extra visibility
+    const numArrows = 16; // Number of arrows around the circle
+    for (let i = 0; i < numArrows; i++) {
+        const angle = (i / numArrows) * Math.PI * 2;
+        const arrowDistance = range * 0.7; // Position arrows at 70% of range
+        
+        // Create arrow line pointing toward center
+        const arrowLength = range * 0.2;
+        const arrowGeometry = new THREE.BufferGeometry().setFromPoints([
+            new THREE.Vector3(
+                Math.cos(angle) * arrowDistance,
+                0.15,
+                Math.sin(angle) * arrowDistance
+            ),
+            new THREE.Vector3(
+                Math.cos(angle) * (arrowDistance - arrowLength),
+                0.15,
+                Math.sin(angle) * (arrowDistance - arrowLength)
+            )
+        ]);
+        
+        const arrowMaterial = new THREE.LineBasicMaterial({
+            color: 0xADD8E6, // Pastel blue
+            transparent: true,
+            opacity: 0.9,
+            linewidth: 3
+        });
+        
+        const arrow = new THREE.Line(arrowGeometry, arrowMaterial);
+        arrow.position.set(holePos.x, 0, holePos.z);
+        arrow.userData.isArrow = true;
+        arrow.userData.angle = angle;
+        scene.add(arrow);
+        magneticFieldIndicators.push(arrow);
+    }
 }
 
 function updateCircleAnimation(circle, time, index, maxRadius) {
-    // Animate circle by scaling it down (shrinking effect)
-    const cycleDuration = 3.0; // 3 seconds per cycle
+    // Handle base ring - pulsing effect
+    if (circle.userData.isBaseRing) {
+        const pulse = Math.sin(time * 2.0) * 0.2 + 0.8; // Pulse between 0.6 and 1.0
+        if (circle.material) {
+            circle.material.opacity = pulse * 0.9;
+        }
+        // Slight scale pulse
+        const scalePulse = Math.sin(time * 2.0) * 0.05 + 1.0;
+        circle.scale.set(scalePulse, scalePulse, 1.0);
+        return;
+    }
+    
+    // Handle inner glow - pulsing effect
+    if (circle.userData.isInnerGlow) {
+        const pulse = Math.sin(time * 3.0) * 0.3 + 0.7; // Pulse between 0.4 and 1.0
+        if (circle.material) {
+            circle.material.opacity = pulse * 0.6;
+        }
+        const scalePulse = Math.sin(time * 3.0) * 0.1 + 1.0;
+        circle.scale.set(scalePulse, scalePulse, 1.0);
+        return;
+    }
+    
+    // Animate animated circles by scaling down (shrinking effect)
+    const cycleDuration = 2.5; // Faster cycle for more visible effect
     const elapsed = time - circle.userData.startTime;
     const cycleTime = elapsed % cycleDuration;
     const progress = cycleTime / cycleDuration; // 0 to 1
@@ -310,15 +420,15 @@ function updateCircleAnimation(circle, time, index, maxRadius) {
     // Scale from max radius down to center (scale from 1.0 to 0.0)
     const scale = 1.0 - progress;
     
-    // Also fade out as it shrinks
+    // Fade out as it shrinks, but keep it more visible
     const fade = scale;
     
     // Update scale
     circle.scale.set(scale, scale, 1.0);
     
-    // Update opacity
+    // Update opacity - keep it brighter
     if (circle.material) {
-        circle.material.opacity = fade * 0.8;
+        circle.material.opacity = fade * 1.0; // Fully opaque when visible
     }
 }
 
@@ -329,4 +439,54 @@ export function cleanupMagneticFieldIndicator() {
         indicator.material?.dispose();
     });
     magneticFieldIndicators = [];
+}
+
+// Remove all hole indicator objects (for mode switching)
+export function removeHoleIndicator() {
+    console.log('HOLE-INDICATOR: Removing all hole indicator objects');
+    
+    // Remove black circle
+    if (blackCircle) {
+        scene.remove(blackCircle);
+        blackCircle.geometry?.dispose();
+        blackCircle.material?.dispose();
+        blackCircle = null;
+    }
+    
+    // Remove color changing circle
+    if (colorChangingCircle) {
+        scene.remove(colorChangingCircle);
+        colorChangingCircle.geometry?.dispose();
+        colorChangingCircle.material?.dispose();
+        colorChangingCircle = null;
+    }
+    
+    // Remove flag
+    if (flag) {
+        scene.remove(flag);
+        flag.geometry?.dispose();
+        flag.material?.dispose();
+        flag = null;
+    }
+    
+    // Remove flag pole
+    if (flagPole) {
+        scene.remove(flagPole);
+        flagPole.geometry?.dispose();
+        flagPole.material?.dispose();
+        flagPole = null;
+    }
+    
+    // Remove pole ball
+    if (poleBall) {
+        scene.remove(poleBall);
+        poleBall.geometry?.dispose();
+        poleBall.material?.dispose();
+        poleBall = null;
+    }
+    
+    // Remove magnetic field indicators
+    cleanupMagneticFieldIndicator();
+    
+    console.log('HOLE-INDICATOR: All hole indicator objects removed');
 }

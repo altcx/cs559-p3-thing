@@ -1,10 +1,18 @@
 // Course management and multiple courses
 import * as THREE from 'three';
 import { scene } from './main.js';
-import { createCourse as createCourseGeometry, getCourseBounds, getRectangularHoleWalls, getRectangularHoleEdgeWalls, removeAllRectangularHoleWalls, removeAllCustomWalls } from './course.js';
+import { createCourse as createCourseGeometry, getCourseBounds, getRectangularHoleWalls, getRectangularHoleEdgeWalls, removeAllRectangularHoleWalls, removeAllCustomWalls, removeCoordinateAxes } from './course.js';
 import { createHole, setHolePosition } from './game.js';
 import { createPowerUp, removeAllPowerUps, POWERUP_TYPES } from './powerups.js';
 import { removeAllBumpers } from './bumpers.js';
+import { removeAllMovingWalls } from './moving-walls.js';
+import { removeAllFans } from './fans.js';
+import { removeAllMagneticFields } from './magnetic-fields.js';
+import { removeAllTeleporters, resetTeleporterState } from './teleporters.js';
+import { removeAllModels } from './course.js';
+import { removeFloor } from './floor.js';
+import { createWindZone, removeAllWindZones } from './wind-zones.js';
+import { updateLightingForCourse } from './main.js';
 
 // Import all level definitions
 import { level1 } from './levels/level1.js';
@@ -12,29 +20,21 @@ import { level2 } from './levels/level2.js';
 import { level3 } from './levels/level3.js';
 import { level4 } from './levels/level4.js';
 import { level5 } from './levels/level5.js';
-import { level6 } from './levels/level6.js';
-import { level7 } from './levels/level7.js';
-import { level8 } from './levels/level8.js';
-import { level9 } from './levels/level9.js';
 
-let gameMode = 'single'; // 'single' or '9holes'
-let currentHoleIn9HoleGame = 0;
+let gameMode = 'single'; // 'single' or '5holes'
+let currentHoleIn5HoleGame = 0;
 
 let currentCourseIndex = 0;
 let courses = [];
 
-// Course definitions - 9 holes total
+// Course definitions - 5 holes total
 // Each level is now defined in its own file in the levels/ directory
 const COURSE_DEFINITIONS = [
     level1,
     level2,
     level3,
     level4,
-    level5,
-    level6,
-    level7,
-    level8,
-    level9
+    level5
 ];
 
 export function getCurrentCourseIndex() {
@@ -98,12 +98,35 @@ export async function loadCourse(courseIndex) {
     
     // Remove all bumpers from previous course
     removeAllBumpers();
+    removeAllMagneticFields();
 
     // Remove rectangular hole walls (both edge and interior)
     removeAllRectangularHoleWalls();
 
     // Remove all custom walls from previous course
     removeAllCustomWalls();
+    
+    // Remove all moving walls from previous course
+    removeAllMovingWalls();
+    
+    // Remove all fans from previous course
+    removeAllFans();
+    
+    // Remove all teleporters from previous course
+    removeAllTeleporters();
+    resetTeleporterState(); // Reset teleporter state for new level
+
+    // Remove all models from previous course
+    removeAllModels();
+
+    // Remove coordinate axes from previous course
+    removeCoordinateAxes();
+    
+    // Remove floor from previous course
+    removeFloor(scene);
+    
+    // Remove wind zones from previous course
+    removeAllWindZones();
     
     // Also remove any orphaned hole indicators and chamfers
     const objectsToRemove = [];
@@ -131,13 +154,17 @@ export async function loadCourse(courseIndex) {
         return null;
     }
     
+    // Update lighting for this course (especially important for levels 4 and 5)
+    updateLightingForCourse(courseIndex);
+    
     const courseDef = COURSE_DEFINITIONS[courseIndex];
     
     // Set hole position before creating course (so course geometry has correct hole)
     setHolePosition(courseDef.holePosition);
     
     // Create course geometry (with hole cutout and hump if applicable)
-    const courseData = createCourseGeometry(courseDef);
+    // Pass courseIndex so coordinate axes can be created for holes 4+
+    const courseData = createCourseGeometry(courseDef, courseIndex);
     
     // Create hole at the correct position
     const holeData = await createHole();
@@ -146,22 +173,44 @@ export async function loadCourse(courseIndex) {
     const powerUps = [];
     if (courseDef.powerUpPositions && courseDef.powerUpPositions.length > 0) {
         console.log('Creating', courseDef.powerUpPositions.length, 'power-ups for course', courseIndex);
+        
+        // All available power-up types - ensure equal probability
+        const availablePowerUps = [
+            POWERUP_TYPES.SPEED_BOOST,
+            POWERUP_TYPES.SHARPSHOOTER,
+            POWERUP_TYPES.MAGNETIC_PULL,
+            POWERUP_TYPES.REWIND
+        ];
+        
         courseDef.powerUpPositions.forEach((pos, index) => {
-            // Randomly select from all available power-ups with equal probability
-            const availablePowerUps = [
-                POWERUP_TYPES.SPEED_BOOST,
-                POWERUP_TYPES.SHARPSHOOTER,
-                POWERUP_TYPES.MAGNETIC_PULL,
-                POWERUP_TYPES.REWIND
-            ];
-            const powerUpType = availablePowerUps[Math.floor(Math.random() * availablePowerUps.length)];
+            // Use crypto.getRandomValues for better randomization if available, otherwise fall back to Math.random
+            let randomIndex;
+            if (typeof crypto !== 'undefined' && crypto.getRandomValues) {
+                const randomArray = new Uint32Array(1);
+                crypto.getRandomValues(randomArray);
+                randomIndex = randomArray[0] % availablePowerUps.length;
+            } else {
+                // Fallback to Math.random with better precision
+                randomIndex = Math.floor(Math.random() * availablePowerUps.length);
+            }
             
-            console.log(`Creating power-up ${index} at position:`, pos, 'type:', powerUpType);
+            const powerUpType = availablePowerUps[randomIndex];
+            
+            console.log(`Creating power-up ${index} at position:`, pos, 'type:', powerUpType, 'randomIndex:', randomIndex);
             const powerUp = createPowerUp(pos, powerUpType);
             powerUps.push(powerUp);
         });
     } else {
         console.log('No power-up positions defined for course', courseIndex);
+    }
+    
+    // Create wind zones for this course
+    if (courseDef.windZones && courseDef.windZones.length > 0) {
+        console.log('Creating', courseDef.windZones.length, 'wind zone(s) for course', courseIndex);
+        courseDef.windZones.forEach((windZoneConfig, index) => {
+            console.log(`Creating wind zone ${index} at position:`, windZoneConfig.position);
+            createWindZone(windZoneConfig);
+        });
     }
     
     const course = {

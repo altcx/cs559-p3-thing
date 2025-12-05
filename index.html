@@ -11,47 +11,58 @@
             box-sizing: border-box;
         }
         
+        @font-face {
+            font-family: 'BM SPACE';
+            src: url('folders/fonts/BMSPA___.TTF') format('truetype');
+        }
+
         body {
-            font-family: Arial, sans-serif;
+            font-family: 'BM SPACE', 'Courier New', monospace;
             overflow: hidden;
             background: #1a1a1a;
         }
         
         #group-id {
             position: absolute;
-            top: 10px;
-            left: 10px;
-            color: white;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            font-family: 'BM SPACE', monospace;
             font-size: 24px;
-            font-weight: bold;
             z-index: 100;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
-            background: rgba(0, 0, 0, 0.5);
+            text-shadow: 2px 2px 0px #000;
+            background: rgba(0, 0, 0, 0.8);
             padding: 10px 15px;
-            border-radius: 5px;
+            border: 2px solid #fff;
+            box-shadow: 4px 4px 0px #555;
         }
         
         #mode-toggle {
             position: absolute;
-            top: 10px;
-            right: 10px;
+            top: 20px;
+            right: 20px;
             z-index: 100;
-            padding: 10px 20px;
-            font-size: 16px;
-            background: #4CAF50;
-            color: white;
-            border: none;
-            border-radius: 5px;
+            padding: 12px 20px;
+            font-family: 'BM SPACE', monospace;
+            font-size: 18px;
+            background: #000;
+            color: #00ff00;
+            border: 2px solid #00ff00;
             cursor: pointer;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3);
+            box-shadow: 4px 4px 0px #005500;
+            text-transform: uppercase;
+            transition: transform 0.1s;
         }
         
         #mode-toggle:hover {
-            background: #45a049;
+            transform: translate(-2px, -2px);
+            box-shadow: 6px 6px 0px #005500;
+            background: #002200;
         }
         
         #mode-toggle:active {
-            transform: scale(0.95);
+            transform: translate(0, 0);
+            box-shadow: 2px 2px 0px #005500;
         }
         
         #power-meter {

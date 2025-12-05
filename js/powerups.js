@@ -166,23 +166,46 @@ function createSaintQuartzGeometry() {
     return geometry;
 }
 
+// Get color for powerup based on type (for prototype mode)
+function getPowerUpColor(type) {
+    switch (type) {
+        case POWERUP_TYPES.SPEED_BOOST:
+            return 0x00ffff; // Cyan/light blue
+        case POWERUP_TYPES.SHARPSHOOTER:
+            return 0xff00ff; // Magenta
+        case POWERUP_TYPES.MAGNETIC_PULL:
+            return 0xffff00; // Yellow
+        case POWERUP_TYPES.REWIND:
+            return 0x00ff00; // Green
+        default:
+            return 0xffffff; // White fallback
+    }
+}
+
 export function createPowerUp(position, type = POWERUP_TYPES.SPEED_BOOST) {
     console.log('Creating power-up at position:', position, 'type:', type);
     
     // Create Saint Quartz-style crystal
     const geometry = createSaintQuartzGeometry();
     
-    // Create iridescent shader material
-    const material = new THREE.ShaderMaterial({
-        uniforms: {
-            time: { value: 0.0 },
-            viewVector: { value: new THREE.Vector3() }
-        },
-        vertexShader: iridescentShader.vertexShader,
-        fragmentShader: iridescentShader.fragmentShader,
-        transparent: true,
-        side: THREE.DoubleSide
-    });
+    // Create material based on mode
+    const material = isFullMode
+        ? new THREE.ShaderMaterial({
+            uniforms: {
+                time: { value: 0.0 },
+                viewVector: { value: new THREE.Vector3() }
+            },
+            vertexShader: iridescentShader.vertexShader,
+            fragmentShader: iridescentShader.fragmentShader,
+            transparent: true,
+            side: THREE.DoubleSide
+        })
+        : new THREE.MeshBasicMaterial({
+            color: getPowerUpColor(type),
+            transparent: true,
+            opacity: 0.9,
+            side: THREE.DoubleSide
+        });
     
     const powerUpMesh = new THREE.Mesh(geometry, material);
     powerUpMesh.position.set(position.x, position.y, position.z);

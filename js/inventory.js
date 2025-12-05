@@ -44,12 +44,12 @@ function updateInventoryUI() {
         const slot = document.createElement('div');
         slot.className = 'powerup-slot';
         slot.style.cssText = `
-            width: 60px;
-            height: 60px;
+            width: 240px;
+            height: 240px;
             background: rgba(255, 255, 255, 0.2);
-            border: 2px solid rgba(255, 255, 255, 0.5);
-            border-radius: 10px;
-            margin: 5px;
+            border: 4px solid rgba(255, 255, 255, 0.5);
+            border-radius: 20px;
+            margin: 10px;
             display: flex;
             align-items: center;
             justify-content: center;
@@ -57,23 +57,23 @@ function updateInventoryUI() {
             position: relative;
         `;
         
-        // Power-up icon/indicator
+        // Power-up icon/indicator - 4x bigger
         const icon = document.createElement('div');
         icon.textContent = getPowerUpIcon(powerUp.type);
         icon.style.cssText = `
-            font-size: 24px;
+            font-size: 96px;
             color: white;
-            text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.8);
+            text-shadow: 4px 4px 8px rgba(0, 0, 0, 0.8);
         `;
         
-        // Hotkey indicator
+        // Hotkey indicator - scaled up
         const hotkey = document.createElement('div');
         hotkey.textContent = (index + 1).toString();
         hotkey.style.cssText = `
             position: absolute;
-            bottom: 2px;
-            right: 4px;
-            font-size: 12px;
+            bottom: 8px;
+            right: 12px;
+            font-size: 48px;
             color: rgba(255, 255, 255, 0.8);
             font-weight: bold;
         `;
@@ -84,24 +84,25 @@ function updateInventoryUI() {
         tooltip.className = 'powerup-tooltip';
         tooltip.style.cssText = `
             position: absolute;
-            right: calc(100% + 8px);
+            right: calc(100% + 16px);
             top: 50%;
             transform: translateY(-50%);
             background: rgba(0, 0, 0, 0.9);
             color: white;
-            padding: 8px 12px;
-            border-radius: 6px;
-            font-size: 12px;
+            padding: 32px 40px;
+            border-radius: 16px;
+            font-size: 36px;
             white-space: nowrap;
             pointer-events: none;
             opacity: 0;
             transition: opacity 0.2s;
             z-index: 1000;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.5);
-            max-width: 200px;
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.5);
+            max-width: 600px;
+            font-weight: bold;
         `;
         
-        // Arrow pointing right (toward the slot)
+        // Arrow pointing right (toward the slot) - larger to match bigger tooltip (2x)
         const arrow = document.createElement('div');
         arrow.style.cssText = `
             position: absolute;
@@ -110,9 +111,9 @@ function updateInventoryUI() {
             transform: translateY(-50%);
             width: 0;
             height: 0;
-            border-top: 6px solid transparent;
-            border-bottom: 6px solid transparent;
-            border-left: 6px solid rgba(0, 0, 0, 0.9);
+            border-top: 20px solid transparent;
+            border-bottom: 20px solid transparent;
+            border-left: 20px solid rgba(0, 0, 0, 0.9);
         `;
         tooltip.appendChild(arrow);
         
@@ -131,11 +132,11 @@ function updateInventoryUI() {
             if (rect.left - tooltipRect.width - 8 < 10) {
                 tooltip.style.right = 'auto';
                 tooltip.style.left = 'calc(100% + 8px)';
-                // Flip arrow to point left
+                // Flip arrow to point left - larger to match bigger tooltip (2x)
                 arrow.style.left = 'auto';
                 arrow.style.right = '100%';
                 arrow.style.borderLeft = 'none';
-                arrow.style.borderRight = '6px solid rgba(0, 0, 0, 0.9)';
+                arrow.style.borderRight = '20px solid rgba(0, 0, 0, 0.9)';
             }
         };
         

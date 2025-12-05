@@ -38,6 +38,31 @@ export function cleanupHole() {
         chamfer = null;
     }
 }
+
+// Remove hole and all related objects (for mode switching)
+export function removeHole() {
+    console.log('GAME: Removing hole and related objects');
+    
+    // Remove hole mesh
+    cleanupHole();
+    
+    // Remove flag and indicator ring (imported from hole-indicator.js)
+    import('./hole-indicator.js').then(module => {
+        if (module.removeHoleIndicator) {
+            module.removeHoleIndicator();
+        }
+    });
+    
+    // Remove spotlight
+    if (window.holeSpotlight) {
+        scene.remove(window.holeSpotlight);
+        if (window.holeSpotlight.target) scene.remove(window.holeSpotlight.target);
+        window.holeSpotlight.dispose();
+        window.holeSpotlight = null;
+    }
+    
+    console.log('GAME: Hole removed');
+}
 let par = 3; // Default par for the hole
 let isHoleComplete = false;
 let holeScores = []; // Array of scores for each hole [{hole: 0, strokes: 3, par: 3, relativeScore: 0}, ...]
@@ -159,6 +184,11 @@ export function getStrokeCount() {
     return strokeCount;
 }
 
+export function setStrokeCount(newCount) {
+    strokeCount = newCount;
+    return strokeCount;
+}
+
 export function getPar() {
     return par;
 }
@@ -216,5 +246,9 @@ export function resetTotalScore() {
 
 export function isComplete() {
     return isHoleComplete;
+}
+
+export function setHoleComplete(complete) {
+    isHoleComplete = complete;
 }
 

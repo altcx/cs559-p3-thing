@@ -1,11 +1,15 @@
 // Ball mesh and physics state
 import * as THREE from 'three';
 import { scene, isFullMode } from './main.js';
+import { registerBallForCosmetics } from './cosmetics.js';
 import { PHYSICS_CONSTANTS } from './physics.js';
 import { getHolePosition } from './game.js';
 import { getTerrainHeight, getRectangularHoles } from './course.js';
 import { isMagneticPullActive, getMagneticPullEffect } from './powerup-effects.js';
-import { handleRectangularHoleOutOfBounds } from './collisions.js';
+import { checkMagneticFieldPull } from './magnetic-fields.js';
+import { handleRectangularHoleOutOfBounds, resetCollisions } from './collisions.js';
+import { checkTeleporterCollision } from './teleporters.js';
+import { showNecoArcModel } from './course.js';
 
 // Calculate terrain slope gradient for realistic ball rolling
 function calculateSlopeGradient(x, z, direction) {
@@ -28,20 +32,37 @@ function calculateSlopeGradient(x, z, direction) {
 }
 
 const BALL_RADIUS = 0.5;
-const COURSE_HEIGHT = 50; // Will match course.js (updated to square)
-let BALL_START_POSITION = new THREE.Vector3(0, BALL_RADIUS, -COURSE_HEIGHT / 2 + 5); // Near top of course
+
+// Ball start position - set per level via setBallStartPosition()
+let BALL_START_POSITION = new THREE.Vector3(0, BALL_RADIUS, 0);
 
 // Track if ball has already triggered rectangular hole out of bounds
 let hasTriggeredRectangularHoleOOB = false;
-let rectangularHoleOOBTimer = 0; // Keep for now in case needed later
 
+// Set the ball's start position for the current level
 export function setBallStartPosition(position) {
-    BALL_START_POSITION.copy(position);
+    if (!position) {
+        console.error('setBallStartPosition called with null/undefined position!');
+        return;
+    }
+    
+    console.log(`Ball: setBallStartPosition called with (${position.x.toFixed(2)}, ${position.y.toFixed(2)}, ${position.z.toFixed(2)})`);
+    BALL_START_POSITION.set(position.x, position.y, position.z);
+    ballPosition.set(position.x, position.y, position.z);
+    ballVelocity.set(0, 0, 0);
+    if (ballMesh) {
+        ballMesh.position.set(position.x, position.y, position.z);
+    }
+    console.log(`  BALL_START_POSITION now: (${BALL_START_POSITION.x.toFixed(2)}, ${BALL_START_POSITION.y.toFixed(2)}, ${BALL_START_POSITION.z.toFixed(2)})`);
+    console.log(`  ballPosition now: (${ballPosition.x.toFixed(2)}, ${ballPosition.y.toFixed(2)}, ${ballPosition.z.toFixed(2)})`);
 }
 
 let ballMesh = null;
+let coordinateDisplay = null; // Sprite showing ball coordinates
 let ballVelocity = new THREE.Vector3(0, 0, 0);
-let ballPosition = BALL_START_POSITION.clone();
+// ballPosition will be initialized from BALL_START_POSITION when setBallStartPosition is called
+let ballPosition = new THREE.Vector3(0, 0.5, 0); // Temporary default, will be updated
+let justTeleported = false; // Flag to skip collision detection for one frame after teleporting
 
 export function createBall() {
     // Remove any existing ball mesh first
@@ -62,7 +83,11 @@ export function createBall() {
     ballMesh.position.copy(ballPosition);
     ballMesh.castShadow = false; // Disable shadow to avoid looking like a platform
     ballMesh.receiveShadow = false;
+    ballMesh.userData.isBall = true; // Mark as ball for cutscene system
     scene.add(ballMesh);
+    registerBallForCosmetics(ballMesh, scene, BALL_RADIUS);
+    
+    // Coordinate display removed - no longer needed
     
     return ballMesh;
 }
@@ -77,10 +102,20 @@ export function updateBallPhysics(deltaTime) {
     const MAX_PULL_DISTANCE = 1.67;
     const POWER_SCALE = 80;
     const MAX_SPEED = MAX_PULL_DISTANCE * POWER_SCALE; // ~133.6 units/sec
+    const ABSOLUTE_MAX_SPEED = 200.0; // Hard cap to prevent phasing through walls
     
     // Get current horizontal speed
     let horizontalVel = new THREE.Vector3(ballVelocity.x, 0, ballVelocity.z);
     let currentSpeed = horizontalVel.length();
+    
+    // Cap maximum velocity to prevent wall phasing
+    if (currentSpeed > ABSOLUTE_MAX_SPEED) {
+        const scaleFactor = ABSOLUTE_MAX_SPEED / currentSpeed;
+        ballVelocity.x *= scaleFactor;
+        ballVelocity.z *= scaleFactor;
+        horizontalVel.multiplyScalar(scaleFactor);
+        currentSpeed = ABSOLUTE_MAX_SPEED;
+    }
     
     // Check if ball is over any rectangular hole (hazard)
     const rectangularHoles = getRectangularHoles();
@@ -139,7 +174,7 @@ export function updateBallPhysics(deltaTime) {
         ballVelocity.multiplyScalar(0.95); // Reduce velocity by 5% per frame
     }
     
-    // Apply magnetic pull force if active
+    // Apply magnetic pull force if active (power-up)
     if (isMagneticPullActive()) {
         const magneticEffect = getMagneticPullEffect();
         if (magneticEffect) {
@@ -166,10 +201,25 @@ export function updateBallPhysics(deltaTime) {
             }
         }
     }
+    
+    // Apply static magnetic field forces
+    const magneticFieldPull = checkMagneticFieldPull(ballPosition, deltaTime);
+    if (magneticFieldPull.lengthSq() > 0) {
+        ballVelocity.add(magneticFieldPull);
+    }
 
     // Apply velocity to position
     const movement = ballVelocity.clone().multiplyScalar(deltaTime);
     ballPosition.add(movement);
+    
+    // Check for teleporter collision BEFORE other collision checks (allows passing through walls)
+    const teleporterResult = checkTeleporterCollision(ballPosition, BALL_RADIUS);
+    if (teleporterResult.teleported) {
+        // Respawn the ball at the destination square
+        respawnBallAtPosition(teleporterResult.destination, teleporterResult.isYellowPortal);
+        // Skip rest of physics update since ball is being respawned
+        return;
+    }
     
     // Recalculate horizontal velocity after potential modifications
     horizontalVel.set(ballVelocity.x, 0, ballVelocity.z);
@@ -247,6 +297,8 @@ export function updateBallPhysics(deltaTime) {
             ballMesh.rotateOnAxis(rotationAxis, rotationAmount);
         }
     }
+    
+    // Coordinate display removed - no longer needed
 }
 
 function getDistanceToHole() {
@@ -285,6 +337,14 @@ export function getBallMesh() {
     return ballMesh;
 }
 
+export function getBallJustTeleported() {
+    return justTeleported;
+}
+
+export function clearBallJustTeleported() {
+    justTeleported = false;
+}
+
 export function hideBall() {
     if (ballMesh) {
         ballMesh.visible = false;
@@ -297,7 +357,48 @@ export function showBall() {
     }
 }
 
+// Respawn ball at current position (used for teleportation)
+export function respawnBallAtPosition(position, isYellowPortal = false) {
+    // Set new position
+    ballPosition.copy(position);
+    ballPosition.y = BALL_RADIUS; // Ensure ball is on the ground
+    ballVelocity.set(0, 0, 0); // Stop the ball completely
+    justTeleported = true; // Skip wall collisions next frame
+    
+    // Reset collision tracking to prevent sweep collision from old position
+    resetCollisions();
+
+    if (ballMesh) {
+        ballMesh.position.copy(ballPosition);
+        ballMesh.rotation.set(0, 0, 0);
+        // Make sure ball is visible
+        ballMesh.visible = true;
+    }
+
+    // Only show neco-arc model and trigger cutscene for yellow portal
+    if (isYellowPortal) {
+        // Show neco-arc model when teleporting (with fade-in and particles)
+        showNecoArcModel();
+
+        // Trigger special yellow portal cutscene - pass destination position
+        if (position) {
+            import('./main.js').then(mainModule => {
+                if (mainModule.onYellowPortalTeleportation) {
+                    mainModule.onYellowPortalTeleportation(position.clone());
+                }
+            });
+        } else {
+            console.error('Yellow portal teleportation triggered but position is null!');
+        }
+    }
+
+    // Coordinate display removed - no longer needed
+    console.log('Ball teleported to:', ballPosition, isYellowPortal ? '(Yellow Portal - Cutscene Triggered!)' : '');
+}
+
 export function resetBall() {
+    console.log(`Ball: resetBall() called`);
+    console.log(`  BALL_START_POSITION: (${BALL_START_POSITION.x.toFixed(2)}, ${BALL_START_POSITION.y.toFixed(2)}, ${BALL_START_POSITION.z.toFixed(2)})`);
     ballPosition.copy(BALL_START_POSITION);
     ballVelocity.set(0, 0, 0);
     // Reset rectangular hole OOB tracking
@@ -306,5 +407,76 @@ export function resetBall() {
         ballMesh.position.copy(ballPosition);
         ballMesh.rotation.set(0, 0, 0);
     }
+    console.log(`  Ball reset to: (${ballPosition.x.toFixed(2)}, ${ballPosition.y.toFixed(2)}, ${ballPosition.z.toFixed(2)})`);
+    // Coordinate display removed - no longer needed
+}
+
+function createCoordinateDisplay() {
+    // Remove existing display if any
+    if (coordinateDisplay) {
+        scene.remove(coordinateDisplay);
+        coordinateDisplay.material.map?.dispose();
+        coordinateDisplay.material.dispose();
+    }
+    
+    const canvas = document.createElement('canvas');
+    const context = canvas.getContext('2d');
+    canvas.width = 256;
+    canvas.height = 128;
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    const spriteMaterial = new THREE.SpriteMaterial({ 
+        map: texture,
+        transparent: true,
+        alphaTest: 0.1
+    });
+    
+    coordinateDisplay = new THREE.Sprite(spriteMaterial);
+    coordinateDisplay.scale.set(4, 2, 1);
+    coordinateDisplay.position.set(ballPosition.x, ballPosition.y + 1.5, ballPosition.z);
+    coordinateDisplay.userData.canvas = canvas;
+    coordinateDisplay.userData.context = context;
+    coordinateDisplay.userData.texture = texture;
+    
+    scene.add(coordinateDisplay);
+    updateCoordinateDisplay();
+}
+
+function updateCoordinateDisplay() {
+    if (!coordinateDisplay) return;
+    
+    const pos = ballPosition;
+    const x = pos.x.toFixed(2);
+    const y = pos.y.toFixed(2);
+    const z = pos.z.toFixed(2);
+    const text = `X: ${x}\nY: ${y}\nZ: ${z}`;
+    
+    const canvas = coordinateDisplay.userData.canvas;
+    const context = coordinateDisplay.userData.context;
+    const texture = coordinateDisplay.userData.texture;
+    
+    // Clear canvas
+    context.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    
+    // Draw text
+    context.fillStyle = '#ffffff';
+    context.font = 'Bold 24px Arial';
+    context.textAlign = 'center';
+    context.textBaseline = 'middle';
+    
+    // Draw multi-line text
+    const lines = text.split('\n');
+    const lineHeight = 28;
+    const startY = canvas.height / 2 - (lines.length - 1) * lineHeight / 2;
+    lines.forEach((line, index) => {
+        context.fillText(line, canvas.width / 2, startY + index * lineHeight);
+    });
+    
+    // Update texture
+    texture.needsUpdate = true;
+    
+    // Update sprite position to follow ball
+    coordinateDisplay.position.set(pos.x, pos.y + 1.5, pos.z);
 }
 

@@ -1,6 +1,6 @@
 // Mouse/touch input handling for ball aiming and launching
 import * as THREE from 'three';
-import { getBallPosition, getBallMesh, setBallVelocity, getBallVelocity } from './ball.js';
+import { getBallPosition, getBallMesh, setBallVelocity, getBallVelocity, setBallPosition } from './ball.js';
 import { incrementStroke, saveBallState } from './game.js';
 import { getSpeedBoostMultiplier, consumeSpeedBoost, isSharpshooterActive, consumeSharpshooter } from './powerup-effects.js';
 
@@ -19,6 +19,7 @@ let isAiming = false;
 let aimStartPosition = null;
 let currentMousePosition = null;
 let wobbleTime = 0;
+let maxPullDistance = 0; // Track maximum distance pulled away from start
 let raycaster = new THREE.Raycaster();
 let mouse = new THREE.Vector2();
 
@@ -26,11 +27,24 @@ let mouse = new THREE.Vector2();
 let touchStartPosition = null;
 let isTouchActive = false;
 
+// State for WASD keyboard controls
+let keysPressed = {};
+const WASD_SPEED = 10.0; // Speed for WASD movement
+
+// Y-key Easter egg for arrow key ball controls
+let yPressCount = 0;
+let lastYPressTime = 0;
+const Y_PRESS_TIMEOUT = 2000; // 2 seconds to reset counter
+let arrowKeyControlsEnabled = false;
+
 export function initControls(cameraRef, rendererRef, controlsRef) {
     camera = cameraRef;
     renderer = rendererRef;
     controls = controlsRef;
     const canvas = renderer.domElement;
+
+    // Log that arrow key ball controls are disabled by default (Easter egg hint)
+    console.log('💡 Tip: Arrow key ball controls are disabled by default. Try pressing Y multiple times...');
     
     // Mouse events
     canvas.addEventListener('mousedown', onMouseDown);
@@ -43,9 +57,111 @@ export function initControls(cameraRef, rendererRef, controlsRef) {
     canvas.addEventListener('touchmove', onTouchMove, { passive: false });
     canvas.addEventListener('touchend', onTouchEnd);
     canvas.addEventListener('touchcancel', onTouchEnd);
+    
+    // Keyboard events for WASD controls
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
 }
 
-function onMouseDown(event) {
+function onKeyDown(event) {
+    const key = event.key.toLowerCase();
+    keysPressed[key] = true;
+
+    // Handle Y key Easter egg for arrow key ball controls
+    if (key === 'y') {
+        const currentTime = Date.now();
+        if (currentTime - lastYPressTime > Y_PRESS_TIMEOUT) {
+            // Reset counter if too much time has passed
+            yPressCount = 1;
+        } else {
+            yPressCount++;
+        }
+        lastYPressTime = currentTime;
+
+        if (yPressCount >= 5 && !arrowKeyControlsEnabled) {
+            arrowKeyControlsEnabled = true;
+            console.log('🎉 Arrow key ball controls UNLOCKED! Use arrow keys to move the ball. Press ESC to disable.');
+            yPressCount = 0; // Reset counter after unlocking
+        } else if (yPressCount > 0 && yPressCount < 5) {
+            console.log(`Y-key progress: ${yPressCount}/5 (press Y ${5 - yPressCount} more times)`);
+        }
+    }
+
+    // Handle ESC to disable arrow key ball controls (only if freecam didn't just handle it)
+    if (event.key === 'Escape' && arrowKeyControlsEnabled && !window._freecamJustToggled) {
+        arrowKeyControlsEnabled = false;
+        console.log('🚫 Arrow key ball controls DISABLED. Press Y 5 times to unlock again.');
+    }
+}
+
+function onKeyUp(event) {
+    const key = event.key.toLowerCase();
+    keysPressed[key] = false;
+}
+
+export function updateWASDControls(deltaTime) {
+    // Check if arrow key ball controls are unlocked via Y-key Easter egg
+    if (!arrowKeyControlsEnabled) {
+        return; // Arrow key controls are disabled by default
+    }
+
+    // Check if any arrow keys are pressed
+    const upPressed = keysPressed['arrowup'];
+    const downPressed = keysPressed['arrowdown'];
+    const leftPressed = keysPressed['arrowleft'];
+    const rightPressed = keysPressed['arrowright'];
+
+    if (!upPressed && !downPressed && !leftPressed && !rightPressed) {
+        return; // No movement keys pressed
+    }
+    
+    const ballPos = getBallPosition();
+    const moveSpeed = WASD_SPEED * deltaTime;
+    
+    // Calculate movement direction based on camera orientation
+    // Get camera forward and right vectors projected onto the XZ plane
+    const cameraForward = new THREE.Vector3();
+    camera.getWorldDirection(cameraForward);
+    cameraForward.y = 0; // Project onto XZ plane
+    cameraForward.normalize();
+    
+    const cameraRight = new THREE.Vector3();
+    cameraRight.crossVectors(cameraForward, new THREE.Vector3(0, 1, 0)).normalize();
+    
+    const movement = new THREE.Vector3(0, 0, 0);
+    
+    // Arrow Up = forward (camera forward direction)
+    if (upPressed) {
+        movement.add(cameraForward.clone().multiplyScalar(moveSpeed));
+    }
+    // Arrow Down = backward (opposite of camera forward)
+    if (downPressed) {
+        movement.add(cameraForward.clone().multiplyScalar(-moveSpeed));
+    }
+    // Arrow Left = left (camera left direction)
+    if (leftPressed) {
+        movement.add(cameraRight.clone().multiplyScalar(-moveSpeed));
+    }
+    // Arrow Right = right (camera right direction)
+    if (rightPressed) {
+        movement.add(cameraRight.clone().multiplyScalar(moveSpeed));
+    }
+    
+    // Apply movement to ball position
+    const newPosition = ballPos.clone().add(movement);
+    newPosition.y = ballPos.y; // Keep Y position the same
+    setBallPosition(newPosition);
+    
+    // Set velocity to zero when using WASD (direct control)
+    setBallVelocity(new THREE.Vector3(0, 0, 0));
+}
+
+// Export function to check if arrow key ball controls are enabled
+export function areWASDControlsEnabled() {
+    return arrowKeyControlsEnabled;
+}
+
+async function onMouseDown(event) {
     if (isAiming) return;
     
     // Check if ball is moving (can't aim while ball is moving)
@@ -85,7 +201,7 @@ function onMouseLeave(event) {
     }
 }
 
-function onTouchStart(event) {
+async function onTouchStart(event) {
     event.preventDefault();
     if (isAiming || isTouchActive) return;
     
@@ -113,6 +229,7 @@ function onTouchMove(event) {
         event.preventDefault();
         const touch = event.touches[0];
         currentMousePosition = new THREE.Vector2(touch.clientX, touch.clientY);
+        // updateAiming() will check if cursor returned to ball and cancel if needed
         updateAiming();
     }
 }
@@ -128,6 +245,7 @@ function onTouchEnd(event) {
 function startAiming(clientX, clientY) {
     isAiming = true;
     wobbleTime = 0;
+    maxPullDistance = 0; // Reset max pull distance
     aimStartPosition = new THREE.Vector2(clientX, clientY);
     currentMousePosition = aimStartPosition.clone();
     
@@ -140,16 +258,33 @@ function startAiming(clientX, clientY) {
 function updateAiming() {
     if (!isAiming || !aimStartPosition || !currentMousePosition) return;
     
-    // Update wobble time
-    wobbleTime += 0.016; // Approximate frame time (will use actual delta in Phase 4)
-    
     // Calculate pull vector
     const pullVector = new THREE.Vector2(
         currentMousePosition.x - aimStartPosition.x,
         currentMousePosition.y - aimStartPosition.y
     );
     
-    const pullDistance = Math.min(pullVector.length() / 100, MAX_PULL_DISTANCE); // Scale pixel distance to world units
+    const distanceFromStart = pullVector.length(); // Distance in pixels
+    const pullDistance = Math.min(distanceFromStart / 100, MAX_PULL_DISTANCE); // Scale pixel distance to world units
+    
+    // Update maximum pull distance (track how far they've moved away)
+    if (distanceFromStart > maxPullDistance) {
+        maxPullDistance = distanceFromStart;
+    }
+    
+    // Only check for return-to-ball if they've moved away significantly first (at least 50 pixels)
+    // This prevents canceling when they're just starting to aim
+    if (maxPullDistance > 50) {
+        // They've moved away, now check if they've returned to near the start
+        // If they bring cursor back to within 40 pixels of where they started, cancel aiming
+        if (distanceFromStart < 40) {
+            cancelAiming();
+            return;
+        }
+    }
+    
+    // Update wobble time
+    wobbleTime += 0.016; // Approximate frame time (will use actual delta in Phase 4)
     
     // Check if pulled back far enough to activate wobble
     if (pullDistance > 0.1) {
@@ -166,24 +301,32 @@ function finishAiming() {
     const ballPos = getBallPosition();
     const ballVel = getBallVelocity();
     
-    // Save ball state before shot (for Mulligan power-up)
-    saveBallState(ballPos, ballVel);
-    
-    const ballScreenPos = getScreenPosition(ballPos);
-    
     // Calculate pull vector in screen space
     const pullVector = new THREE.Vector2(
         currentMousePosition.x - aimStartPosition.x,
         currentMousePosition.y - aimStartPosition.y
     );
     
-    const pullDistance = Math.min(pullVector.length() / 100, MAX_PULL_DISTANCE);
+    const distanceFromStart = pullVector.length();
+    const pullDistance = Math.min(distanceFromStart / 100, MAX_PULL_DISTANCE);
+    
+    // Only cancel if they've moved away significantly AND returned to near start
+    if (maxPullDistance > 50 && distanceFromStart < 40) {
+        // They moved away and came back, cancel aiming without shooting
+        cancelAiming();
+        return;
+    }
     
     if (pullDistance < 0.1) {
         // Too close, cancel
         cancelAiming();
         return;
     }
+    
+    // Save ball state before shot (for Mulligan power-up)
+    saveBallState(ballPos, ballVel);
+    
+    const ballScreenPos = getScreenPosition(ballPos);
     
     // Calculate world direction (pull BACK, so ball goes FORWARD in opposite direction)
     const pullBackDirection = calculateWorldDirection(ballScreenPos, currentMousePosition);
@@ -234,6 +377,7 @@ function cancelAiming() {
     aimStartPosition = null;
     currentMousePosition = null;
     wobbleTime = 0;
+    maxPullDistance = 0; // Reset max pull distance
     
     // Re-enable camera controls when not aiming
     if (controls) {

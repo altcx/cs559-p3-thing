@@ -12,6 +12,8 @@ import { checkBumperCollisions } from './bumpers.js';
 const BALL_RADIUS = 0.5;
 let isOutOfBounds = false;
 let hasTriggeredRectangularHoleOOB = false; // Prevent multiple triggers
+let outOfBoundsTimer = 0;
+const OUT_OF_BOUNDS_GRACE = 0.35; // seconds the ball must stay outside before penalty
 
 // Store previous position for continuous collision detection
 let previousBallPosition = null;
@@ -20,6 +22,7 @@ let previousBallPosition = null;
 export function checkWallCollisions() {
     const ballPos = getBallPosition();
     const ballVel = getBallVelocity();
+    const deltaTime = PHYSICS_CONSTANTS?.DELTA_TIME_OVERRIDE || 0; // optional override, else handled by substeps
     
     // Store previous position for next frame
     if (previousBallPosition === null) {
@@ -31,15 +34,26 @@ export function checkWallCollisions() {
     // Initialize collision tracking
     let collisionOccurred = false;
     
-    // Check if completely out of bounds
-    if (ballPos.x < bounds.minX - OUT_OF_BOUNDS_MARGIN || 
+    // Check if completely out of bounds, but allow a short grace period
+    const outsideBounds = (
+        ballPos.x < bounds.minX - OUT_OF_BOUNDS_MARGIN || 
         ballPos.x > bounds.maxX + OUT_OF_BOUNDS_MARGIN ||
         ballPos.z < bounds.minZ - OUT_OF_BOUNDS_MARGIN || 
-        ballPos.z > bounds.maxZ + OUT_OF_BOUNDS_MARGIN) {
-        if (!isOutOfBounds) {
+        ballPos.z > bounds.maxZ + OUT_OF_BOUNDS_MARGIN
+    );
+    if (outsideBounds) {
+        // Use deltaTime if provided; otherwise assume ~60fps for safety
+        const dt = deltaTime && deltaTime > 0 ? deltaTime : 1 / 60;
+        outOfBoundsTimer += dt;
+        if (outOfBoundsTimer >= OUT_OF_BOUNDS_GRACE && !isOutOfBounds) {
             handleOutOfBounds();
+            return true;
         }
+        // Still outside but within grace period; treat as collision handled to avoid further processing
         return true;
+    } else {
+        // Reset timer when back inside
+        outOfBoundsTimer = 0;
     }
     
     // Normal wall collision (only for standard rectangular courses - custom wall courses use customWalls)
@@ -198,42 +212,129 @@ export function checkWallCollisions() {
         }
     }
     
-    // Check collisions with custom walls (simple AABB collision)
+    // Check collisions with custom walls using swept collision detection
+    // This prevents fast-moving balls from phasing through walls
     if (!collisionOccurred) {
         const customWalls = getCustomWalls();
+        const prevPos = previousBallPosition || ballPos.clone();
+        
         for (const wall of customWalls) {
             const bounds = wall.userData.bounds;
             if (!bounds) continue;
             
-            // Check if ball overlaps wall bounds
-            if (ballPos.x + BALL_RADIUS > bounds.minX && 
-                ballPos.x - BALL_RADIUS < bounds.maxX &&
-                ballPos.z + BALL_RADIUS > bounds.minZ && 
-                ballPos.z - BALL_RADIUS < bounds.maxZ) {
+            // Expand bounds by ball radius for swept sphere collision
+            const expandedBounds = {
+                minX: bounds.minX - BALL_RADIUS,
+                maxX: bounds.maxX + BALL_RADIUS,
+                minZ: bounds.minZ - BALL_RADIUS,
+                maxZ: bounds.maxZ + BALL_RADIUS
+            };
+            
+            // First check: is ball currently overlapping?
+            const currentlyOverlapping = (
+                ballPos.x > expandedBounds.minX && 
+                ballPos.x < expandedBounds.maxX &&
+                ballPos.z > expandedBounds.minZ && 
+                ballPos.z < expandedBounds.maxZ
+            );
+            
+            // Second check: did ball path cross through the wall? (swept collision)
+            let sweptCollision = false;
+            let collisionT = 1.0; // Parameter along path where collision occurs (0=start, 1=end)
+            let collisionNormal = new THREE.Vector3();
+            
+            if (!currentlyOverlapping && prevPos) {
+                // Check if line segment from prevPos to ballPos crosses any wall face
+                const dx = ballPos.x - prevPos.x;
+                const dz = ballPos.z - prevPos.z;
                 
-                // Ball is overlapping - find the closest edge and push out
-                const distToLeft = ballPos.x - bounds.minX;
-                const distToRight = bounds.maxX - ballPos.x;
-                const distToFront = ballPos.z - bounds.minZ;
-                const distToBack = bounds.maxZ - ballPos.z;
+                // Check each face of the expanded AABB
+                // Left face (x = minX)
+                if (dx > 0 && prevPos.x <= expandedBounds.minX && ballPos.x >= expandedBounds.minX) {
+                    const t = (expandedBounds.minX - prevPos.x) / dx;
+                    const zAtT = prevPos.z + t * dz;
+                    if (t >= 0 && t <= 1 && zAtT >= expandedBounds.minZ && zAtT <= expandedBounds.maxZ) {
+                        if (t < collisionT) {
+                            collisionT = t;
+                            collisionNormal.set(-1, 0, 0);
+                            sweptCollision = true;
+                        }
+                    }
+                }
+                // Right face (x = maxX)
+                if (dx < 0 && prevPos.x >= expandedBounds.maxX && ballPos.x <= expandedBounds.maxX) {
+                    const t = (expandedBounds.maxX - prevPos.x) / dx;
+                    const zAtT = prevPos.z + t * dz;
+                    if (t >= 0 && t <= 1 && zAtT >= expandedBounds.minZ && zAtT <= expandedBounds.maxZ) {
+                        if (t < collisionT) {
+                            collisionT = t;
+                            collisionNormal.set(1, 0, 0);
+                            sweptCollision = true;
+                        }
+                    }
+                }
+                // Front face (z = minZ)
+                if (dz > 0 && prevPos.z <= expandedBounds.minZ && ballPos.z >= expandedBounds.minZ) {
+                    const t = (expandedBounds.minZ - prevPos.z) / dz;
+                    const xAtT = prevPos.x + t * dx;
+                    if (t >= 0 && t <= 1 && xAtT >= expandedBounds.minX && xAtT <= expandedBounds.maxX) {
+                        if (t < collisionT) {
+                            collisionT = t;
+                            collisionNormal.set(0, 0, -1);
+                            sweptCollision = true;
+                        }
+                    }
+                }
+                // Back face (z = maxZ)
+                if (dz < 0 && prevPos.z >= expandedBounds.maxZ && ballPos.z <= expandedBounds.maxZ) {
+                    const t = (expandedBounds.maxZ - prevPos.z) / dz;
+                    const xAtT = prevPos.x + t * dx;
+                    if (t >= 0 && t <= 1 && xAtT >= expandedBounds.minX && xAtT <= expandedBounds.maxX) {
+                        if (t < collisionT) {
+                            collisionT = t;
+                            collisionNormal.set(0, 0, 1);
+                            sweptCollision = true;
+                        }
+                    }
+                }
+            }
+            
+            if (currentlyOverlapping || sweptCollision) {
+                let correctedPos;
                 
-                const minDist = Math.min(distToLeft, distToRight, distToFront, distToBack);
-                
-                const correctedPos = ballPos.clone();
-                let collisionNormal = new THREE.Vector3();
-                
-                if (minDist === distToLeft) {
-                    correctedPos.x = bounds.minX - BALL_RADIUS;
-                    collisionNormal.set(-1, 0, 0);
-                } else if (minDist === distToRight) {
-                    correctedPos.x = bounds.maxX + BALL_RADIUS;
-                    collisionNormal.set(1, 0, 0);
-                } else if (minDist === distToFront) {
-                    correctedPos.z = bounds.minZ - BALL_RADIUS;
-                    collisionNormal.set(0, 0, -1);
-                } else if (minDist === distToBack) {
-                    correctedPos.z = bounds.maxZ + BALL_RADIUS;
-                    collisionNormal.set(0, 0, 1);
+                if (sweptCollision && !currentlyOverlapping) {
+                    // Ball passed through - place it at the collision point
+                    correctedPos = new THREE.Vector3(
+                        prevPos.x + collisionT * (ballPos.x - prevPos.x),
+                        ballPos.y,
+                        prevPos.z + collisionT * (ballPos.z - prevPos.z)
+                    );
+                    // Push slightly outside the wall
+                    correctedPos.add(collisionNormal.clone().multiplyScalar(0.01));
+                } else {
+                    // Ball is currently overlapping - push out to nearest edge
+                    const distToLeft = ballPos.x - expandedBounds.minX;
+                    const distToRight = expandedBounds.maxX - ballPos.x;
+                    const distToFront = ballPos.z - expandedBounds.minZ;
+                    const distToBack = expandedBounds.maxZ - ballPos.z;
+                    
+                    const minDist = Math.min(distToLeft, distToRight, distToFront, distToBack);
+                    
+                    correctedPos = ballPos.clone();
+                    
+                    if (minDist === distToLeft) {
+                        correctedPos.x = expandedBounds.minX;
+                        collisionNormal.set(-1, 0, 0);
+                    } else if (minDist === distToRight) {
+                        correctedPos.x = expandedBounds.maxX;
+                        collisionNormal.set(1, 0, 0);
+                    } else if (minDist === distToFront) {
+                        correctedPos.z = expandedBounds.minZ;
+                        collisionNormal.set(0, 0, -1);
+                    } else if (minDist === distToBack) {
+                        correctedPos.z = expandedBounds.maxZ;
+                        collisionNormal.set(0, 0, 1);
+                    }
                 }
                 
                 setBallPosition(correctedPos);
@@ -465,17 +566,16 @@ export function checkWallCollisions() {
         }
     }
 
-    // Update previous position for next frame (only if no collision occurred)
-    // If collision occurred, previousBallPosition was already updated to corrected position
-    if (!collisionOccurred) {
-        previousBallPosition = ballPos.clone();
-    }
+    // Always update previous position for next frame
+    // Use the current (possibly corrected) ball position
+    previousBallPosition = getBallPosition().clone();
 
     return collisionOccurred;
 }
 
 function handleOutOfBounds() {
     isOutOfBounds = true;
+    outOfBoundsTimer = 0;
     setBallVelocity(new THREE.Vector3(0, 0, 0));
     
     // +2 stroke penalty
@@ -547,4 +647,5 @@ export function resetCollisions() {
     isOutOfBounds = false;
     previousBallPosition = null; // Reset previous position tracking
     hasTriggeredRectangularHoleOOB = false; // Reset flag when collisions reset
+    outOfBoundsTimer = 0;
 }

@@ -527,6 +527,167 @@ export function updatePowerUpParticles(particleSystem, powerUpPosition) {
     particleSystem.geometry.attributes.position.needsUpdate = true;
 }
 
+// Magic appearance effect for neco-arc model (sparkles and swirls appearing out of thin air)
+export function createMagicAppearanceEffect(position) {
+    // Create multiple waves of magic particles
+    const colors = [0xffff00, 0xff00ff, 0x00ffff, 0xffffff, 0xffaa00]; // Yellow, Magenta, Cyan, White, Orange
+    
+    // Initial burst of sparkles
+    for (let wave = 0; wave < 5; wave++) {
+        setTimeout(() => {
+            const waveOffset = new THREE.Vector3(
+                (Math.random() - 0.5) * 20,
+                Math.random() * 30 + 5,
+                (Math.random() - 0.5) * 20
+            );
+            
+            // Create spiral/swirl particles
+            createMagicSwirlParticles(
+                position.clone().add(waveOffset),
+                colors[wave % colors.length],
+                60 + wave * 20,
+                3.0 + wave * 0.5
+            );
+        }, wave * 300); // Stagger each wave by 300ms
+    }
+    
+    // Create central magic burst
+    setTimeout(() => {
+        createParticleBurst(position.clone().add(new THREE.Vector3(0, 15, 0)), 0xffffff, 200, 8.0);
+        createParticleBurst(position.clone().add(new THREE.Vector3(0, 10, 0)), 0xffff00, 150, 6.0);
+    }, 500);
+}
+
+// Create swirling magic particles
+function createMagicSwirlParticles(position, color, count = 50, speed = 3.0) {
+    const geometry = new THREE.BufferGeometry();
+    const positions = new Float32Array(count * 3);
+    const velocities = new Float32Array(count * 3);
+    const colors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+    const lifetimes = new Float32Array(count);
+    
+    const particleColor = new THREE.Color(color);
+    
+    for (let i = 0; i < count; i++) {
+        const i3 = i * 3;
+        
+        // Spiral motion - particles spiral inward/upward
+        const angle = (i / count) * Math.PI * 4; // Multiple rotations
+        const radius = Math.random() * 5 + 2;
+        
+        velocities[i3] = Math.cos(angle) * speed * 0.5;
+        velocities[i3 + 1] = Math.random() * speed + 1.0; // Upward motion
+        velocities[i3 + 2] = Math.sin(angle) * speed * 0.5;
+        
+        // Start in a ring around the position
+        positions[i3] = position.x + Math.cos(angle) * radius;
+        positions[i3 + 1] = position.y + Math.random() * 10;
+        positions[i3 + 2] = position.z + Math.sin(angle) * radius;
+        
+        // Vary the color slightly
+        const colorVariation = 0.3;
+        colors[i3] = Math.min(1, particleColor.r + (Math.random() - 0.5) * colorVariation);
+        colors[i3 + 1] = Math.min(1, particleColor.g + (Math.random() - 0.5) * colorVariation);
+        colors[i3 + 2] = Math.min(1, particleColor.b + (Math.random() - 0.5) * colorVariation);
+        
+        sizes[i] = Math.random() * 1.5 + 0.5;
+        lifetimes[i] = Math.random() * 1.5 + 1.0; // 1-2.5 seconds
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    const material = new THREE.PointsMaterial({
+        size: 1.5,
+        vertexColors: true,
+        transparent: true,
+        opacity: 1.0,
+        blending: THREE.AdditiveBlending,
+        sizeAttenuation: true
+    });
+    
+    const particles = new THREE.Points(geometry, material);
+    particles.userData.velocities = velocities;
+    particles.userData.lifetimes = lifetimes;
+    particles.userData.startTime = Date.now();
+    particles.userData.startPositions = positions.slice();
+    
+    scene.add(particles);
+    particleSystems.push(particles);
+    
+    return particles;
+}
+
+// Ball explosion effect - dramatic particles emanating from ball during cutscene
+export function createBallExplosionEffect(ballPosition) {
+    // Create multiple types of explosion particles
+    const colors = [0xff0000, 0xff4400, 0xff8800, 0xffcc00, 0xffffff]; // Fire colors
+    
+    // Random color for this burst
+    const burstColor = colors[Math.floor(Math.random() * colors.length)];
+    
+    const geometry = new THREE.BufferGeometry();
+    const count = 30; // Particles per burst
+    const positions = new Float32Array(count * 3);
+    const velocities = new Float32Array(count * 3);
+    const particleColors = new Float32Array(count * 3);
+    const sizes = new Float32Array(count);
+    const lifetimes = new Float32Array(count);
+    
+    const baseColor = new THREE.Color(burstColor);
+    
+    for (let i = 0; i < count; i++) {
+        const i3 = i * 3;
+        
+        // Explosion pattern - particles shoot outward in all directions
+        const theta = Math.random() * Math.PI * 2;
+        const phi = Math.random() * Math.PI;
+        const speed = Math.random() * 8 + 4; // Fast outward motion
+        
+        velocities[i3] = Math.sin(phi) * Math.cos(theta) * speed;
+        velocities[i3 + 1] = Math.cos(phi) * speed * 0.5 + 2; // Slight upward bias
+        velocities[i3 + 2] = Math.sin(phi) * Math.sin(theta) * speed;
+        
+        // Start at ball position with slight offset
+        positions[i3] = ballPosition.x + (Math.random() - 0.5) * 0.5;
+        positions[i3 + 1] = ballPosition.y + (Math.random() - 0.5) * 0.5;
+        positions[i3 + 2] = ballPosition.z + (Math.random() - 0.5) * 0.5;
+        
+        // Vary color for fire-like effect
+        particleColors[i3] = baseColor.r;
+        particleColors[i3 + 1] = baseColor.g * (0.5 + Math.random() * 0.5);
+        particleColors[i3 + 2] = baseColor.b * Math.random() * 0.3;
+        
+        sizes[i] = Math.random() * 2.0 + 1.0;
+        lifetimes[i] = Math.random() * 0.5 + 0.3; // Short-lived for rapid effect
+    }
+    
+    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    geometry.setAttribute('color', new THREE.BufferAttribute(particleColors, 3));
+    geometry.setAttribute('size', new THREE.BufferAttribute(sizes, 1));
+    
+    const material = new THREE.PointsMaterial({
+        size: 2.0,
+        vertexColors: true,
+        transparent: true,
+        opacity: 1.0,
+        blending: THREE.AdditiveBlending,
+        sizeAttenuation: true
+    });
+    
+    const particles = new THREE.Points(geometry, material);
+    particles.userData.velocities = velocities;
+    particles.userData.lifetimes = lifetimes;
+    particles.userData.startTime = Date.now();
+    
+    scene.add(particles);
+    particleSystems.push(particles);
+    
+    return particles;
+}
+
 export function updateEnvironmentalParticles() {
     if (!environmentalParticles) {
         createEnvironmentalParticles();

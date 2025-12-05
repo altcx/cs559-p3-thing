@@ -1,0 +1,720 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Golf Level Grid Editor</title>
+    <style>
+        body {
+            font-family: 'Courier New', monospace;
+            max-width: 95%;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #e0e0e0;
+        }
+        h1 {
+            color: #4CAF50;
+        }
+        .toolbar {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            align-items: center;
+        }
+        .toolbar button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            font-size: 14px;
+            cursor: pointer;
+            border-radius: 4px;
+            min-width: 100px;
+        }
+        .toolbar button:hover {
+            background: #45a049;
+        }
+        .toolbar button.active {
+            background: #ff6b6b;
+            font-weight: bold;
+        }
+        .toolbar .info-text {
+            margin-left: auto;
+            color: #888;
+            font-size: 12px;
+        }
+        .grid-container {
+            background: #2a2a2a;
+            padding: 20px;
+            border-radius: 4px;
+            overflow-x: auto;
+            margin-bottom: 20px;
+        }
+        .grid {
+            display: inline-grid;
+            grid-template-columns: repeat(var(--grid-size, 50), 1fr);
+            gap: 1px;
+            background: #444;
+            border: 2px solid #666;
+            padding: 2px;
+        }
+        .cell {
+            width: 12px;
+            height: 12px;
+            background: #333;
+            cursor: pointer;
+            border: 1px solid #222;
+            transition: all 0.1s;
+        }
+        .cell:hover {
+            border-color: #4CAF50;
+            transform: scale(1.2);
+            z-index: 10;
+            position: relative;
+        }
+        .cell.empty { background: #333; }
+        .cell.start { background: #00ff00; }
+        .cell.hole { background: #0000ff; }
+        .cell.bumper { background: #ffd700; }
+        .cell.fan { background: #ff8800; }
+        .cell.magnetic { background: #ff00ff; }
+        .cell.powerup { background: #00ffff; }
+        .cell.wall { background: #ffffff; }
+        .cell.hazard { background: #ff0000; }
+        .controls {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        .controls input {
+            background: #2a2a2a;
+            color: #e0e0e0;
+            border: 1px solid #444;
+            padding: 8px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+        .output-section {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 4px;
+        }
+        .output {
+            background: #1a1a1a;
+            border: 1px solid #444;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            white-space: pre-wrap;
+            overflow-x: auto;
+            max-height: 400px;
+            overflow-y: auto;
+            min-width: 800px;
+        }
+        .legend {
+            background: #2a2a2a;
+            padding: 15px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 10px;
+        }
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border: 1px solid #444;
+        }
+    </style>
+</head>
+<body>
+    <h1>🏌️ Golf Level Grid Editor</h1>
+    
+    <div class="legend">
+        <div class="legend-item"><div class="legend-color" style="background: #00ff00;"></div><span>S = Start</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #0000ff;"></div><span>H = Hole</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #ffffff;"></div><span>W = Wall</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #ffd700;"></div><span>B = Bumper</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #ff8800;"></div><span>F = Fan</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #ff00ff;"></div><span>M = Magnetic</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #00ffff;"></div><span>P = Power-up</span></div>
+        <div class="legend-item"><div class="legend-color" style="background: #ff0000;"></div><span>R = Hazard</span></div>
+    </div>
+    
+    <div class="toolbar">
+        <button onclick="setTool('empty')" id="btn-empty" class="active">Clear</button>
+        <button onclick="setTool('start')" id="btn-start">Start (S)</button>
+        <button onclick="setTool('hole')" id="btn-hole">Hole (H)</button>
+        <button onclick="setTool('wall')" id="btn-wall">Wall (W)</button>
+        <button onclick="setTool('bumper')" id="btn-bumper">Bumper (B)</button>
+        <button onclick="setTool('fan')" id="btn-fan">Fan (F)</button>
+        <button onclick="setTool('magnetic')" id="btn-magnetic">Magnetic (M)</button>
+        <button onclick="setTool('powerup')" id="btn-powerup">Power-up (P)</button>
+        <button onclick="setTool('hazard')" id="btn-hazard">Hazard (R)</button>
+        <span class="info-text">Click cells to place objects</span>
+    </div>
+    
+    <div class="controls">
+        <label>Grid Size: <input type="number" id="gridSize" value="50" min="10" max="200" onchange="resizeGrid()"></label>
+        <label>Level Name: <input type="text" id="levelName" value="level5"></label>
+        <button onclick="generateCode()">Generate Code</button>
+        <button onclick="clearGrid()">Clear All</button>
+        <button onclick="loadExample()">Load Example</button>
+        <button onclick="markStartPosition()">Mark Start Position</button>
+    </div>
+    
+    <div class="grid-container">
+        <div class="grid" id="grid"></div>
+    </div>
+    
+    <div class="output-section">
+        <h2>Generated Code</h2>
+        <div class="output" id="output">Click "Generate Code" to see output...</div>
+        <button onclick="copyCode()">Copy Code</button>
+    </div>
+
+    <script>
+        let currentTool = 'empty';
+        let gridData = [];
+        let gridSize = 50;
+        
+        function setTool(tool) {
+            currentTool = tool;
+            // Update button states
+            document.querySelectorAll('.toolbar button').forEach(btn => btn.classList.remove('active'));
+            document.getElementById(`btn-${tool}`).classList.add('active');
+        }
+        
+        function createGrid(size, preserveData = false) {
+            const oldSize = gridSize;
+            const oldData = gridData;
+            
+            gridSize = size;
+            
+            // Only reset data if not preserving or first time
+            if (!preserveData || !gridData) {
+                gridData = Array(size).fill(null).map(() => Array(size).fill('empty'));
+            } else {
+                // Preserve existing data when resizing
+                const newGridData = Array(size).fill(null).map(() => Array(size).fill('empty'));
+                const copySize = Math.min(oldSize, size);
+                for (let row = 0; row < copySize; row++) {
+                    for (let col = 0; col < copySize; col++) {
+                        newGridData[row][col] = oldData[row][col] || 'empty';
+                    }
+                }
+                gridData = newGridData;
+            }
+            
+            const grid = document.getElementById('grid');
+            grid.style.setProperty('--grid-size', size);
+            grid.innerHTML = '';
+            
+            for (let row = 0; row < size; row++) {
+                for (let col = 0; col < size; col++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell empty';
+                    cell.dataset.row = row;
+                    cell.dataset.col = col;
+                    cell.onclick = () => placeObject(row, col);
+                    grid.appendChild(cell);
+                }
+            }
+            updateGridDisplay();
+        }
+        
+        function placeObject(row, col) {
+            if (currentTool === 'empty') {
+                gridData[row][col] = 'empty';
+            } else {
+                // If placing start or hole, clear any existing ones
+                if (currentTool === 'start') {
+                    for (let i = 0; i < gridSize; i++) {
+                        for (let j = 0; j < gridSize; j++) {
+                            if (gridData[i][j] === 'start') {
+                                gridData[i][j] = 'empty';
+                            }
+                        }
+                    }
+                }
+                if (currentTool === 'hole') {
+                    for (let i = 0; i < gridSize; i++) {
+                        for (let j = 0; j < gridSize; j++) {
+                            if (gridData[i][j] === 'hole') {
+                                gridData[i][j] = 'empty';
+                            }
+                        }
+                    }
+                }
+                gridData[row][col] = currentTool;
+            }
+            updateGridDisplay();
+        }
+        
+        function updateGridDisplay() {
+            const cells = document.querySelectorAll('.cell');
+            cells.forEach(cell => {
+                const row = parseInt(cell.dataset.row);
+                const col = parseInt(cell.dataset.col);
+                if (row >= 0 && row < gridSize && col >= 0 && col < gridSize) {
+                    const type = gridData[row][col] || 'empty';
+                    cell.className = `cell ${type}`;
+                }
+            });
+        }
+        
+        function resizeGrid() {
+            const newSize = parseInt(document.getElementById('gridSize').value);
+            if (newSize >= 10 && newSize <= 200) {
+                resizeGridData(newSize);
+            }
+        }
+
+        function resizeGridData(newSize) {
+            createGrid(newSize, true);
+        }
+        
+        function clearGrid() {
+            if (confirm('Clear entire grid?')) {
+                gridData = Array(gridSize).fill(null).map(() => Array(gridSize).fill('empty'));
+                updateGridDisplay();
+            }
+        }
+        
+        function loadExample() {
+            // Create a simple example: start at bottom, hole at top
+            const mid = Math.floor(gridSize / 2);
+            gridData[mid][0] = 'start';
+            gridData[mid][gridSize - 1] = 'hole';
+            updateGridDisplay();
+        }
+        
+        function markStartPosition() {
+            // Calculate grid position for default ball start at (0, 0.5, 0)
+            // Grid is centered at (0,0), each cell = 2 units
+            // offsetX = -(gridSize - 1) * 2 / 2 = -(gridSize - 1)
+            // offsetZ = -(gridSize - 1) * 2 / 2 = -(gridSize - 1)
+            // For world position (0, 0):
+            // col = (0 - offsetX) / 2
+            // row = (0 - offsetZ) / 2
+            
+            const cellSize = 2.0;
+            const offsetX = -(gridSize - 1) * cellSize / 2;
+            const offsetZ = -(gridSize - 1) * cellSize / 2;
+            
+            const worldX = 0;
+            const worldZ = 0;
+            
+            const col = Math.round((worldX - offsetX) / cellSize);
+            const row = Math.round((worldZ - offsetZ) / cellSize);
+            
+            // Clear any existing start
+            for (let i = 0; i < gridSize; i++) {
+                for (let j = 0; j < gridSize; j++) {
+                    if (gridData[i][j] === 'start') {
+                        gridData[i][j] = 'empty';
+                    }
+                }
+            }
+            
+            // Place start at calculated position (center of grid)
+            if (row >= 0 && row < gridSize && col >= 0 && col < gridSize) {
+                gridData[row][col] = 'start';
+                updateGridDisplay();
+                alert(`Start position marked at grid center (${col}, ${row}) - world position (0, 0.5, 0)`);
+            } else {
+                alert(`Start position (${col}, ${row}) is outside grid bounds. Grid size: ${gridSize}x${gridSize}`);
+            }
+        }
+        
+        function gridToText() {
+            return gridData.map(row => 
+                row.map(cell => {
+                    const map = {
+                        'empty': '.',
+                        'start': 'S',
+                        'hole': 'H',
+                        'wall': 'W',
+                        'bumper': 'B',
+                        'fan': 'F',
+                        'magnetic': 'M',
+                        'powerup': 'P',
+                        'hazard': 'R'
+                    };
+                    return map[cell] || '.';
+                }).join('')
+            ).join('\n');
+        }
+        
+        function parseGridLevel(gridString, options = {}) {
+            const lines = gridString.trim().split('\n').map(line => {
+                const commentIndex = line.indexOf('//');
+                if (commentIndex !== -1) {
+                    return line.substring(0, commentIndex).trim();
+                }
+                return line.trim();
+            }).filter(line => line.length > 0);
+            
+            const gridHeight = lines.length;
+            const gridWidth = Math.max(...lines.map(line => line.length));
+            
+            const cellSize = options.cellSize || 2.0;
+            const courseWidth = gridWidth * cellSize;
+            const courseHeight = gridHeight * cellSize;
+            
+            const offsetX = -(gridWidth - 1) * cellSize / 2;
+            const offsetZ = -(gridHeight - 1) * cellSize / 2;
+            
+            const levelDef = {
+                width: courseWidth,
+                height: courseHeight,
+                holePosition: null,
+                ballStartPosition: null,
+                hasHump: options.hasHump || false,
+                powerUpPositions: [],
+                bumpers: [],
+                fans: [],
+                magneticFields: [],
+                customWalls: [],
+                rectangularHoles: [],
+                ...options
+            };
+            
+            const wallGrid = Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(false));
+            const holeGrid = Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(false));
+            
+            for (let row = 0; row < gridHeight; row++) {
+                const line = lines[row];
+                for (let col = 0; col < line.length; col++) {
+                    const char = line[col].toUpperCase();
+                    if (char === '.' || char === ' ') continue;
+                    
+                    const x = offsetX + col * cellSize;
+                    const z = offsetZ + row * cellSize;
+                    
+                    switch (char) {
+                        case 'S':
+                            levelDef.ballStartPosition = { x, y: 0.5, z };
+                            break;
+                        case 'H':
+                            levelDef.holePosition = { x, y: 0, z };
+                            break;
+                        case 'B':
+                            levelDef.bumpers.push({
+                                position: { x, y: 0.5, z },
+                                radius: options.bumperRadius || 1.5,
+                                tubeRadius: options.bumperTubeRadius || 0.3
+                            });
+                            break;
+                        case 'F':
+                            levelDef.fans.push({
+                                x, z,
+                                radius: options.fanRadius || 3.0,
+                                height: options.fanHeight || 0.1,
+                                numBlades: options.fanBlades || 4,
+                                rotationSpeed: options.fanSpeed || 2.0,
+                                pushStrength: options.fanStrength || 8.0,
+                                bladeLengthMultiplier: options.fanBladeLength || 1.6,
+                                color: options.fanColor || 0x888888
+                            });
+                            break;
+                        case 'M':
+                            levelDef.magneticFields.push({
+                                position: { x, y: 0.5, z },
+                                strength: options.magneticStrength || 0.5,
+                                range: options.magneticRange || 8.0
+                            });
+                            break;
+                        case 'P':
+                            levelDef.powerUpPositions.push({ x, y: 1.0, z });
+                            break;
+                        case 'W':
+                            wallGrid[row][col] = true;
+                            break;
+                        case 'R':
+                            holeGrid[row][col] = true;
+                            break;
+                    }
+                }
+            }
+            
+            // Fuse walls
+            const usedWalls = Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(false));
+            
+            for (let row = 0; row < gridHeight; row++) {
+                let runStart = -1;
+                for (let col = 0; col <= gridWidth; col++) {
+                    const isWall = col < gridWidth && wallGrid[row][col];
+                    if (isWall && runStart === -1) {
+                        runStart = col;
+                    } else if (!isWall && runStart !== -1) {
+                        const runLength = col - runStart;
+                        if (runLength > 0) {
+                            const centerCol = runStart + (runLength - 1) / 2;
+                            const x = offsetX + centerCol * cellSize;
+                            const z = offsetZ + row * cellSize;
+                            levelDef.customWalls.push({
+                                x: x,
+                                z: z,
+                                width: runLength * cellSize,
+                                depth: cellSize
+                            });
+                            for (let c = runStart; c < col; c++) {
+                                usedWalls[row][c] = true;
+                            }
+                        }
+                        runStart = -1;
+                    }
+                }
+            }
+            
+            for (let col = 0; col < gridWidth; col++) {
+                let runStart = -1;
+                for (let row = 0; row <= gridHeight; row++) {
+                    const isWall = row < gridHeight && wallGrid[row][col] && !usedWalls[row][col];
+                    if (isWall && runStart === -1) {
+                        runStart = row;
+                    } else if ((!isWall || usedWalls[row][col]) && runStart !== -1) {
+                        const runLength = row - runStart;
+                        if (runLength > 0) {
+                            const centerRow = runStart + (runLength - 1) / 2;
+                            const x = offsetX + col * cellSize;
+                            const z = offsetZ + centerRow * cellSize;
+                            levelDef.customWalls.push({
+                                x: x,
+                                z: z,
+                                width: cellSize,
+                                depth: runLength * cellSize
+                            });
+                            for (let r = runStart; r < row; r++) {
+                                usedWalls[r][col] = true;
+                            }
+                        }
+                        runStart = -1;
+                    }
+                }
+            }
+            
+            for (let row = 0; row < gridHeight; row++) {
+                for (let col = 0; col < gridWidth; col++) {
+                    if (wallGrid[row][col] && !usedWalls[row][col]) {
+                        const x = offsetX + col * cellSize;
+                        const z = offsetZ + row * cellSize;
+                        levelDef.customWalls.push({
+                            x: x,
+                            z: z,
+                            width: cellSize,
+                            depth: cellSize
+                        });
+                    }
+                }
+            }
+            
+            // Fuse holes
+            const usedHoles = Array(gridHeight).fill(null).map(() => Array(gridWidth).fill(false));
+            
+            for (let row = 0; row < gridHeight; row++) {
+                let runStart = -1;
+                for (let col = 0; col <= gridWidth; col++) {
+                    const isHole = col < gridWidth && holeGrid[row][col];
+                    if (isHole && runStart === -1) {
+                        runStart = col;
+                    } else if (!isHole && runStart !== -1) {
+                        const runLength = col - runStart;
+                        if (runLength > 0) {
+                            const centerCol = runStart + (runLength - 1) / 2;
+                            const x = offsetX + centerCol * cellSize;
+                            const z = offsetZ + row * cellSize;
+                            levelDef.rectangularHoles.push({
+                                x: x,
+                                z: z,
+                                width: runLength * cellSize,
+                                length: cellSize
+                            });
+                            for (let c = runStart; c < col; c++) {
+                                usedHoles[row][c] = true;
+                            }
+                        }
+                        runStart = -1;
+                    }
+                }
+            }
+            
+            for (let col = 0; col < gridWidth; col++) {
+                let runStart = -1;
+                for (let row = 0; row <= gridHeight; row++) {
+                    const isHole = row < gridHeight && holeGrid[row][col] && !usedHoles[row][col];
+                    if (isHole && runStart === -1) {
+                        runStart = row;
+                    } else if ((!isHole || usedHoles[row][col]) && runStart !== -1) {
+                        const runLength = row - runStart;
+                        if (runLength > 0) {
+                            const centerRow = runStart + (runLength - 1) / 2;
+                            const x = offsetX + col * cellSize;
+                            const z = offsetZ + centerRow * cellSize;
+                            levelDef.rectangularHoles.push({
+                                x: x,
+                                z: z,
+                                width: cellSize,
+                                length: runLength * cellSize
+                            });
+                            for (let r = runStart; r < row; r++) {
+                                usedHoles[r][col] = true;
+                            }
+                        }
+                        runStart = -1;
+                    }
+                }
+            }
+            
+            for (let row = 0; row < gridHeight; row++) {
+                for (let col = 0; col < gridWidth; col++) {
+                    if (holeGrid[row][col] && !usedHoles[row][col]) {
+                        const x = offsetX + col * cellSize;
+                        const z = offsetZ + row * cellSize;
+                        levelDef.rectangularHoles.push({
+                            x: x,
+                            z: z,
+                            width: cellSize,
+                            length: cellSize
+                        });
+                    }
+                }
+            }
+            
+            if (!levelDef.holePosition) {
+                levelDef.holePosition = { x: 0, y: 0, z: courseHeight / 2 - cellSize };
+            }
+            if (!levelDef.ballStartPosition) {
+                levelDef.ballStartPosition = { x: 0, y: 0.5, z: -courseHeight / 2 + cellSize };
+            }
+            
+            return levelDef;
+        }
+        
+        function generateCode() {
+            const gridText = gridToText();
+            const levelName = document.getElementById('levelName').value || 'level5';
+            const levelDef = parseGridLevel(gridText);
+            
+            let code = `// ${levelName.charAt(0).toUpperCase() + levelName.slice(1)}: Generated from grid format\n`;
+            code += `import * as THREE from 'three';\n\n`;
+            code += `export const ${levelName} = {\n`;
+            
+            code += `    width: ${levelDef.width},\n`;
+            code += `    height: ${levelDef.height},\n`;
+            
+            if (levelDef.holePosition) {
+                code += `    holePosition: new THREE.Vector3(${levelDef.holePosition.x}, ${levelDef.holePosition.y}, ${levelDef.holePosition.z}),\n`;
+            }
+            
+            if (levelDef.ballStartPosition) {
+                code += `    ballStartPosition: new THREE.Vector3(${levelDef.ballStartPosition.x}, ${levelDef.ballStartPosition.y}, ${levelDef.ballStartPosition.z}),\n`;
+            }
+            
+            code += `    hasHump: ${levelDef.hasHump},\n`;
+            
+            if (levelDef.powerUpPositions && levelDef.powerUpPositions.length > 0) {
+                code += `    powerUpPositions: [\n`;
+                levelDef.powerUpPositions.forEach(pos => {
+                    code += `        new THREE.Vector3(${pos.x}, ${pos.y}, ${pos.z}),\n`;
+                });
+                code += `    ],\n`;
+            } else {
+                code += `    powerUpPositions: [],\n`;
+            }
+            
+            if (levelDef.bumpers && levelDef.bumpers.length > 0) {
+                code += `    bumpers: [\n`;
+                levelDef.bumpers.forEach(bumper => {
+                    code += `        {\n`;
+                    code += `            position: new THREE.Vector3(${bumper.position.x}, ${bumper.position.y}, ${bumper.position.z}),\n`;
+                    code += `            radius: ${bumper.radius},\n`;
+                    code += `            tubeRadius: ${bumper.tubeRadius}\n`;
+                    code += `        },\n`;
+                });
+                code += `    ],\n`;
+            } else {
+                code += `    bumpers: [],\n`;
+            }
+            
+            if (levelDef.fans && levelDef.fans.length > 0) {
+                code += `    fans: [\n`;
+                levelDef.fans.forEach(fan => {
+                    code += `        {\n`;
+                    code += `            x: ${fan.x},\n`;
+                    code += `            z: ${fan.z},\n`;
+                    code += `            radius: ${fan.radius},\n`;
+                    code += `            height: ${fan.height},\n`;
+                    code += `            numBlades: ${fan.numBlades},\n`;
+                    code += `            rotationSpeed: ${fan.rotationSpeed},\n`;
+                    code += `            pushStrength: ${fan.pushStrength},\n`;
+                    code += `            bladeLengthMultiplier: ${fan.bladeLengthMultiplier},\n`;
+                    code += `            color: ${fan.color}\n`;
+                    code += `        },\n`;
+                });
+                code += `    ],\n`;
+            }
+            
+            if (levelDef.magneticFields && levelDef.magneticFields.length > 0) {
+                code += `    magneticFields: [\n`;
+                levelDef.magneticFields.forEach(field => {
+                    code += `        {\n`;
+                    code += `            position: new THREE.Vector3(${field.position.x}, ${field.position.y}, ${field.position.z}),\n`;
+                    code += `            strength: ${field.strength},\n`;
+                    code += `            range: ${field.range}\n`;
+                    code += `        },\n`;
+                });
+                code += `    ],\n`;
+            }
+            
+            if (levelDef.customWalls && levelDef.customWalls.length > 0) {
+                code += `    customWalls: [\n`;
+                levelDef.customWalls.forEach(wall => {
+                    code += `        { x: ${wall.x}, z: ${wall.z}, width: ${wall.width}, depth: ${wall.depth} },\n`;
+                });
+                code += `    ],\n`;
+            }
+            
+            if (levelDef.rectangularHoles && levelDef.rectangularHoles.length > 0) {
+                code += `    rectangularHoles: [\n`;
+                levelDef.rectangularHoles.forEach(hole => {
+                    code += `        {\n`;
+                    code += `            x: ${hole.x},\n`;
+                    code += `            z: ${hole.z},\n`;
+                    code += `            width: ${hole.width},\n`;
+                    code += `            length: ${hole.length}\n`;
+                    code += `        },\n`;
+                });
+                code += `    ],\n`;
+            }
+            
+            code += `};\n`;
+            
+            document.getElementById('output').textContent = code;
+        }
+        
+        function copyCode() {
+            const code = document.getElementById('output').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                alert('Code copied to clipboard!');
+            });
+        }
+        
+        // Initialize grid on load
+        createGrid(50);
+        // Automatically mark the default start position at (0, 0) when page loads
+        markStartPosition();
+    </script>
+</body>
+</html>
