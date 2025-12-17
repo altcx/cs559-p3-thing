@@ -8,6 +8,7 @@ import { resetCollisions } from './collisions.js';
 import { restoreStartingCameraAngle, isFreeCamActive } from './main.js';
 import { getGhostBallStrokes, isGhostBallActive } from './ghost-ball.js';
 import { isGhostAIEnabled, getGhostAIState } from './ghost-ai.js';
+import { areWASDControlsEnabled } from './controls.js';
 
 // Export triggerRatingEffects so main.js can call it
 export function triggerRatingEffects(rating, holePosition) {
@@ -51,6 +52,7 @@ let ratingTextDisplay = null; // Large rating text shown during pause
 let resetButton = null;
 let ghostBallIndicator = null; // Ghost ball status indicator
 let cameraControlIndicator = null; // Camera freecam toggle indicator
+let controlsDisplay = null; // Controls display panel
 let hudVisible = true;
 
 function applyHUDVisibility() {
@@ -61,6 +63,7 @@ function applyHUDVisibility() {
     if (ghostBallIndicator) ghostBallIndicator.style.display = display;
     if (resetButton) resetButton.style.display = display;
     if (cameraControlIndicator) cameraControlIndicator.style.display = display;
+    if (controlsDisplay) controlsDisplay.style.display = display;
 }
 
 export function setHUDVisibility(visible) {
@@ -194,6 +197,46 @@ export function initHUD() {
         </div>
     `;
     document.body.appendChild(ghostBallIndicator);
+
+    // Create controls display panel
+    controlsDisplay = document.createElement('div');
+    controlsDisplay.id = 'controls-display';
+    controlsDisplay.style.cssText = `
+        position: absolute;
+        top: 80px;
+        right: 20px;
+        font-family: 'BM SPACE', monospace;
+        color: #ffffff;
+        font-size: 12px;
+        background: rgba(0, 0, 0, 0.85);
+        padding: 12px 16px;
+        border: 2px solid #ffffff;
+        z-index: 100;
+        line-height: 1.6;
+        box-shadow: 4px 4px 0px #555555;
+        min-width: 200px;
+        max-width: 280px;
+    `;
+        controlsDisplay.innerHTML = `
+        <div style="font-weight: 700; font-size: 14px; color: #ffff00; margin-bottom: 8px; text-transform: uppercase; border-bottom: 1px solid #555; padding-bottom: 4px;">
+            CONTROLS
+        </div>
+        <div style="margin-bottom: 6px;">
+            <span style="color: #00ff00; font-weight: 600;">AIM & SHOOT:</span>
+        </div>
+        <div style="margin-bottom: 8px; margin-left: 8px; font-size: 11px; color: #ccc; line-height: 1.5;">
+            Click ball, drag back,<br>release to shoot
+        </div>
+        <div style="margin-bottom: 6px;">
+            <span style="color: #ff0000; font-weight: 600;">[R]:</span>
+            <span style="color: #ccc;"> Reset level (+1)</span>
+        </div>
+        <div style="margin-bottom: 6px;">
+            <span style="color: #88DDFF; font-weight: 600;">[C]:</span>
+            <span style="color: #ccc;"> Toggle freecam</span>
+        </div>
+    `;
+    document.body.appendChild(controlsDisplay);
 
     applyHUDVisibility();
 
@@ -338,6 +381,44 @@ export function updateHUD() {
             cameraControlIndicator.style.borderColor = 'rgba(136, 221, 255, 0.3)';
             cameraControlIndicator.style.background = 'rgba(20, 20, 20, 0.75)';
         }
+    }
+
+    // Update controls display
+    if (controlsDisplay) {
+        const arrowKeysEnabled = areWASDControlsEnabled();
+        const arrowKeysSection = arrowKeysEnabled 
+            ? `<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid #555;">
+                <div style="margin-bottom: 6px;">
+                    <span style="color: #00ffff; font-weight: 600;">[↑↓←→]:</span>
+                    <span style="color: #ccc;"> Move ball</span>
+                </div>
+                <div style="margin-bottom: 6px;">
+                    <span style="color: #ff0000; font-weight: 600;">[ESC]:</span>
+                    <span style="color: #ccc;"> Disable arrows</span>
+                </div>
+            </div>`
+            : '';
+
+        controlsDisplay.innerHTML = `
+            <div style="font-weight: 700; font-size: 14px; color: #ffff00; margin-bottom: 8px; text-transform: uppercase; border-bottom: 1px solid #555; padding-bottom: 4px;">
+                CONTROLS
+            </div>
+            <div style="margin-bottom: 6px;">
+                <span style="color: #00ff00; font-weight: 600;">AIM & SHOOT:</span>
+            </div>
+            <div style="margin-bottom: 8px; margin-left: 8px; font-size: 11px; color: #ccc; line-height: 1.5;">
+                Click ball, drag back,<br>release to shoot
+            </div>
+            <div style="margin-bottom: 6px;">
+                <span style="color: #ff0000; font-weight: 600;">[R]:</span>
+                <span style="color: #ccc;"> Reset level (+1)</span>
+            </div>
+            <div style="margin-bottom: 6px;">
+                <span style="color: #88DDFF; font-weight: 600;">[C]:</span>
+                <span style="color: #ccc;"> Toggle freecam</span>
+            </div>
+            ${arrowKeysSection}
+        `;
     }
 }
 
